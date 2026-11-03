@@ -14,14 +14,25 @@ use objc2_app_kit::{
     NSTableView, NSTableViewDataSource, NSTableViewDelegate, NSTextField, NSView, NSWindow, NSWindowDelegate,
     NSWindowStyleMask,
 };
-use objc2_foundation::{NSIndexSet, NSInteger, NSNotification, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
+use objc2_app_kit::{
+    NSDragOperation, NSDraggingInfo, NSMenuDelegate, NSModalResponseOK, NSOpenPanel, NSPasteboardItem,
+    NSPasteboardWriting, NSPopUpButton, NSTableViewDropOperation, NSTextFieldDelegate, NSTokenField,
+    NSTokenFieldDelegate, NSWorkspace,
+};
+use objc2_foundation::{
+    NSArray, NSBundle, NSIndexSet, NSInteger, NSNotification, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+    NSURL,
+};
 
 use crate::OWN_BUNDLE_ID;
 use crate::agent::{Log, config_path};
-use crate::browsers::{self, Launch};
+use crate::browsers::{self, AppId, Launch};
 use crate::config_edit::{ConfigDoc, RuleDraft, Setting};
 use crate::rules::{Link, Modifiers, Request, Ruleset, SourceApp, SourceVia};
 use crate::{install, macos, ui};
+
+/// Pasteboard type for reordering rows; private to the rule list.
+const ROW_DRAG_TYPE: &str = "dev.bopen.rule-row";
 
 const MODIFIERS: [(&str, &str); 4] =
     [("shift", "⇧ Shift"), ("control", "⌃ Control"), ("option", "⌥ Option"), ("command", "⌘ Command")];
@@ -31,7 +42,9 @@ struct Widgets {
     table: Retained<NSTableView>,
     name: Retained<NSTextField>,
     enabled: Retained<NSButton>,
-    from: Retained<NSTextField>,
+    /// Tokens are the config's strings; bundle ids display as the app's name.
+    from: Retained<NSTokenField>,
+    add_app: Retained<NSPopUpButton>,
     host: Retained<NSTextField>,
     path: Retained<NSTextField>,
     url: Retained<NSTextField>,
@@ -56,8 +69,17 @@ struct Widgets {
 
 impl Widgets {
     fn form_controls(&self) -> Vec<&NSView> {
-        let mut v: Vec<&NSView> =
-            vec![&self.name, &self.enabled, &self.from, &self.host, &self.path, &self.url, &self.open, &self.rewrite];
+        let mut v: Vec<&NSView> = vec![
+            &self.name,
+            &self.enabled,
+            &self.from,
+            &self.add_app,
+            &self.host,
+            &self.path,
+            &self.url,
+            &self.open,
+            &self.rewrite,
+        ];
         v.extend(self.mods.iter().map(|m| -> &NSView { m }));
         v
     }
@@ -71,6 +93,10 @@ pub struct Ivars {
     /// Mirrors the document's rules for the table's data source.
     rules: RefCell<Vec<RuleDraft>>,
     selected: Cell<Option<usize>>,
+    /// Bundle ids behind the + menu's items, by tag.
+    app_choices: RefCell<Vec<String>>,
+    /// The row being dragged in the rule list.
+    dragging: Cell<Option<usize>>,
     /// Set while the form is filled from the document, so the fill doesn't echo back as edits.
     filling: Cell<bool>,
 }
@@ -100,9 +126,70 @@ define_class!(
             let title = self.ivars().rules.borrow().get(row as usize).map(RuleDraft::title);
             title.map(|t| Retained::into_super(Retained::into_super(NSString::from_str(&t))))
         }
+
+        #[unsafe(method_id(tableView:pasteboardWriterForRow:))]
+        fn drag_row(&self, _table: &NSTableView, row: NSInteger) -> Option<Retained<ProtocolObject<dyn NSPasteboardWriting>>> {
+            self.ivars().dragging.set(Some(row as usize));
+            let item = NSPasteboardItem::new();
+            item.setString_forType(&NSString::from_str(&row.to_string()), &NSString::from_str(ROW_DRAG_TYPE));
+            Some(ProtocolObject::from_retained(item))
+        }
+
+        /// Rows drop between rows, never onto one.
+        #[unsafe(method(tableView:validateDrop:proposedRow:proposedDropOperation:))]
+        fn validate_drop(
+            &self,
+            table: &NSTableView,
+            _info: &ProtocolObject<dyn NSDraggingInfo>,
+            row: NSInteger,
+            operation: NSTableViewDropOperation,
+        ) -> NSDragOperation {
+            if self.ivars().dragging.get().is_none() {
+                return NSDragOperation::None;
+            }
+            if operation == NSTableViewDropOperation::On {
+                table.setDropRow_dropOperation(row, NSTableViewDropOperation::Above);
+            }
+            NSDragOperation::Move
+        }
+
+        #[unsafe(method(tableView:acceptDrop:row:dropOperation:))]
+        fn accept_drop(
+            &self,
+            _table: &NSTableView,
+            _info: &ProtocolObject<dyn NSDraggingInfo>,
+            row: NSInteger,
+            _operation: NSTableViewDropOperation,
+        ) -> bool {
+            let Some(from) = self.ivars().dragging.take() else { return false.into() };
+            // Dropping above row `row` removes `from` first, so later targets shift up by one.
+            let to = if row as usize > from { row as usize - 1 } else { row as usize };
+            if to != from {
+                self.edit(None, |doc| doc.move_rule(from, to));
+                self.select(Some(to));
+            }
+            true
+        }
     }
 
     unsafe impl NSControlTextEditingDelegate for SettingsController {}
+
+    unsafe impl NSTextFieldDelegate for SettingsController {}
+
+    unsafe impl NSTokenFieldDelegate for SettingsController {
+        #[unsafe(method_id(tokenField:displayStringForRepresentedObject:))]
+        fn token_display(&self, _field: &NSTokenField, object: &AnyObject) -> Option<Retained<NSString>> {
+            object.downcast_ref::<NSString>().map(|s| NSString::from_str(&app_display_name(&s.to_string())))
+        }
+    }
+
+    /// The + menu next to "is opened from", rebuilt each time it opens so it lists what's running now.
+    unsafe impl NSMenuDelegate for SettingsController {
+        #[unsafe(method(menuNeedsUpdate:))]
+        fn menu_needs_update(&self, menu: &NSMenu) {
+            self.fill_app_menu(menu);
+        }
+    }
 
     unsafe impl NSTableViewDelegate for SettingsController {
         #[unsafe(method(tableViewSelectionDidChange:))]
@@ -131,12 +218,7 @@ define_class!(
     impl SettingsController {
         #[unsafe(method(formChanged:))]
         fn form_changed(&self, _sender: Option<&AnyObject>) {
-            if self.ivars().filling.get() {
-                return;
-            }
-            let Some(index) = self.ivars().selected.get() else { return };
-            let draft = self.read_form();
-            self.edit(Some(index), |doc| doc.replace_rule(index, &draft));
+            self.save_form();
         }
 
         #[unsafe(method(addRule:))]
@@ -163,6 +245,24 @@ define_class!(
         #[unsafe(method(moveDown:))]
         fn move_down(&self, _sender: Option<&AnyObject>) {
             self.move_by(1);
+        }
+
+        #[unsafe(method(appPicked:))]
+        fn app_picked(&self, sender: &NSPopUpButton) {
+            let tag = sender.selectedItem().map_or(-1, |i| i.tag());
+            let picked = match usize::try_from(tag) {
+                Ok(i) => self.ivars().app_choices.borrow().get(i).cloned(),
+                Err(_) => choose_app(self.mtm()),
+            };
+            if let Some(id) = picked {
+                let mut current = tokens(&self.w().from);
+                if !current.iter().any(|t| t.eq_ignore_ascii_case(&id)) {
+                    current.push(id);
+                }
+                let current: Vec<_> = current.iter().map(|s| NSString::from_str(s)).collect();
+                unsafe { self.w().from.setObjectValue(Some(&NSArray::from_retained_slice(&current))) };
+                self.save_form();
+            }
         }
 
         #[unsafe(method(testChanged:))]
@@ -220,6 +320,8 @@ impl SettingsController {
             doc: RefCell::new(None),
             rules: RefCell::new(vec![]),
             selected: Cell::new(None),
+            dragging: Cell::new(None),
+            app_choices: RefCell::new(vec![]),
             filling: Cell::new(false),
         });
         unsafe { msg_send![super(this), init] }
@@ -244,6 +346,8 @@ impl SettingsController {
         #[allow(deprecated)]
         app.activateIgnoringOtherApps(true);
         self.w().window.makeKeyAndOrderFront(None);
+        // Don't open with the default browser's text selected, one keystroke from replaced.
+        self.w().window.makeFirstResponder(None);
     }
 
     fn w(&self) -> &Widgets {
@@ -334,7 +438,8 @@ impl SettingsController {
         self.ivars().filling.set(true);
         set_text(&w.name, &r.name);
         set_on(&w.enabled, r.enabled || !editable);
-        set_text(&w.from, &r.from.join(", "));
+        let tokens: Vec<_> = r.from.iter().map(|s| NSString::from_str(s)).collect();
+        unsafe { w.from.setObjectValue(Some(&NSArray::from_retained_slice(&tokens))) };
         set_text(&w.host, &r.host.join(", "));
         set_text(&w.path, &r.path.join(", "));
         set_text(&w.url, &r.url.join(", "));
@@ -354,6 +459,49 @@ impl SettingsController {
         w.down.setEnabled(i.is_some_and(|i| i + 1 < len));
     }
 
+    /// Title item, then running regular apps by name, then "Choose app…" (tag -1).
+    fn fill_app_menu(&self, menu: &NSMenu) {
+        let mtm = self.mtm();
+        menu.removeAllItems();
+        let item = |title: &str, tag: isize| {
+            let item = unsafe {
+                NSMenuItem::initWithTitle_action_keyEquivalent(
+                    NSMenuItem::alloc(mtm),
+                    &NSString::from_str(title),
+                    None,
+                    &NSString::new(),
+                )
+            };
+            item.setTag(tag);
+            item
+        };
+        menu.addItem(&item("+", -2));
+        let mut apps: Vec<(String, String)> = NSWorkspace::sharedWorkspace()
+            .runningApplications()
+            .iter()
+            .filter(|a| a.activationPolicy() == NSApplicationActivationPolicy::Regular)
+            .filter_map(|a| Some((a.localizedName()?.to_string(), a.bundleIdentifier()?.to_string())))
+            .filter(|(_, id)| id != OWN_BUNDLE_ID)
+            .collect();
+        apps.sort_by_key(|(name, _)| name.to_lowercase());
+        apps.dedup_by(|a, b| a.1 == b.1);
+        for (i, (name, _)) in apps.iter().enumerate() {
+            menu.addItem(&item(name, i as isize));
+        }
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        menu.addItem(&item("Choose app…", -1));
+        *self.ivars().app_choices.borrow_mut() = apps.into_iter().map(|(_, id)| id).collect();
+    }
+
+    fn save_form(&self) {
+        if self.ivars().filling.get() {
+            return;
+        }
+        let Some(index) = self.ivars().selected.get() else { return };
+        let draft = self.read_form();
+        self.edit(Some(index), |doc| doc.replace_rule(index, &draft));
+    }
+
     fn read_form(&self) -> RuleDraft {
         let w = self.w();
         let list = |f: &NSTextField| -> Vec<String> {
@@ -362,7 +510,7 @@ impl SettingsController {
         RuleDraft {
             name: w.name.stringValue().to_string(),
             enabled: is_on(&w.enabled),
-            from: list(&w.from),
+            from: tokens(&w.from),
             host: list(&w.host),
             path: list(&w.path),
             url: list(&w.url),
@@ -488,7 +636,7 @@ impl SettingsController {
         let tabs = NSTabView::initWithFrame(NSTabView::alloc(mtm), rect(10.0, 10.0, 760.0, 570.0));
         let rules_view = NSView::initWithFrame(NSView::alloc(mtm), rect(0.0, 0.0, 740.0, 520.0));
         let general_view = NSView::initWithFrame(NSView::alloc(mtm), rect(0.0, 0.0, 740.0, 520.0));
-        for (label, view) in [("Rules", &rules_view), ("General", &general_view)] {
+        for (label, view) in [("General", &general_view), ("Rules", &rules_view)] {
             let item = NSTabViewItem::new();
             item.setLabel(&NSString::from_str(label));
             item.setView(Some(view));
@@ -504,6 +652,8 @@ impl SettingsController {
         column.setWidth(230.0);
         table.addTableColumn(&column);
         table.setHeaderView(None);
+        table.registerForDraggedTypes(&NSArray::from_retained_slice(&[NSString::from_str(ROW_DRAG_TYPE)]));
+        table.setDraggingSourceOperationMask_forLocal(NSDragOperation::Move, true);
         unsafe {
             table.setDataSource(Some(ProtocolObject::from_ref(self)));
             table.setDelegate(Some(ProtocolObject::from_ref(self)));
@@ -538,7 +688,20 @@ impl SettingsController {
         let name = b.field("Shown in the list", form_change, rect(fx, row("Name"), fw, 24.0));
         let enabled = b.checkbox("Rule is on", form_change, rect(fx, row(""), fw, 22.0));
         heading("When the link…");
-        let from = b.field("Slack, com.microsoft.Outlook", form_change, rect(fx, row("is opened from"), fw, 24.0));
+        let from_y = row("is opened from");
+        let from = b.token_field("Slack, com.microsoft.Outlook", form_change, rect(fx, from_y, fw - 44.0, 24.0));
+        let add_app = NSPopUpButton::initWithFrame_pullsDown(
+            NSPopUpButton::alloc(mtm),
+            rect(fx + fw - 40.0, from_y - 1.0, 40.0, 26.0),
+            true,
+        );
+        add_app.addItemWithTitle(&NSString::from_str("+"));
+        add_app.setToolTip(Some(&NSString::from_str("Add a running app, or choose one from Applications")));
+        if let Some(menu) = add_app.menu() {
+            menu.setDelegate(Some(ProtocolObject::from_ref(self)));
+        }
+        b.wire(&add_app, sel!(appPicked:));
+        add(&rules_view, &add_app);
         let host = b.field("acme.com, *.atlassian.net, =exact.host", form_change, rect(fx, row("host is"), fw, 24.0));
         let path = b.field("/j/*   (each * becomes {1}, {2}, …)", form_change, rect(fx, row("path matches"), fw, 24.0));
         let url = b.field("https://github.com/acme/*", form_change, rect(fx, row("URL matches"), fw, 24.0));
@@ -616,6 +779,7 @@ impl SettingsController {
             name,
             enabled,
             from,
+            add_app,
             host,
             path,
             url,
@@ -677,6 +841,20 @@ impl Builder<'_> {
         self.wire(&f, action);
         // Act when the field loses focus too, not only on Return.
         if let Some(cell) = f.cell() {
+            let _: () = unsafe { msg_send![&cell, setSendsActionOnEndEditing: true] };
+        }
+        f
+    }
+
+    fn token_field(&self, placeholder: &str, action: Sel, frame: NSRect) -> Retained<NSTokenField> {
+        let f = NSTokenField::initWithFrame(NSTokenField::alloc(self.mtm), frame);
+        f.setPlaceholderString(Some(&NSString::from_str(placeholder)));
+        unsafe { f.setDelegate(Some(ProtocolObject::from_ref(self.target))) };
+        self.wire(&f, action);
+        // One scrolling line, like the other fields, instead of wrapping out of view.
+        if let Some(cell) = f.cell() {
+            cell.setWraps(false);
+            cell.setScrollable(true);
             let _: () = unsafe { msg_send![&cell, setSendsActionOnEndEditing: true] };
         }
         f
@@ -769,6 +947,37 @@ fn main_menu(mtm: MainThreadMarker) -> Retained<NSMenu> {
     ));
     bar.addItem(&submenu("Window", vec![item("Close", Some(sel!(performClose:)), "w")]));
     bar
+}
+
+/// "Slack" for `com.tinyspeck.slackmacgap` when that app is installed; anything else as written.
+fn app_display_name(token: &str) -> String {
+    let app =
+        Some(token).filter(|t| t.contains('.')).and_then(|t| AppId::new(t).ok()).and_then(|id| macos::app_path(&id));
+    app.and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned())).unwrap_or_else(|| token.to_string())
+}
+
+/// An Open panel on /Applications; the chosen app's bundle id.
+fn choose_app(mtm: MainThreadMarker) -> Option<String> {
+    let panel = NSOpenPanel::openPanel(mtm);
+    panel.setCanChooseFiles(true);
+    panel.setCanChooseDirectories(false);
+    panel.setDirectoryURL(Some(&NSURL::fileURLWithPath(&NSString::from_str("/Applications"))));
+    panel.setPrompt(Some(&NSString::from_str("Add")));
+    if panel.runModal() != NSModalResponseOK {
+        return None;
+    }
+    let url = panel.URLs().firstObject()?;
+    NSBundle::bundleWithURL(&url)?.bundleIdentifier().map(|s| s.to_string())
+}
+
+fn tokens(field: &NSTokenField) -> Vec<String> {
+    let Some(value) = field.objectValue() else { return vec![] };
+    let Some(array) = value.downcast_ref::<NSArray>() else { return vec![] };
+    array
+        .iter()
+        .filter_map(|o| o.downcast_ref::<NSString>().map(|s| s.to_string().trim().to_string()))
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn rect(x: f64, y: f64, w: f64, h: f64) -> NSRect {

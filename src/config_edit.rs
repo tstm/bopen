@@ -236,6 +236,15 @@ impl ConfigDoc {
         }
     }
 
+    /// Move rule `from` so it ends up at index `to`, as adjacent swaps so every rule keeps its
+    /// comments and the text order follows.
+    pub fn move_rule(&mut self, from: usize, to: usize) {
+        match from <= to {
+            true => (from..to).for_each(|i| self.swap_rules(i, i + 1)),
+            false => (to..from).rev().for_each(|i| self.swap_rules(i, i + 1)),
+        }
+    }
+
     /// Swap two rules. Their file positions swap too, so the text order follows (comments above
     /// a rule move with it).
     pub fn swap_rules(&mut self, a: usize, b: usize) {
@@ -243,13 +252,16 @@ impl ConfigDoc {
         if a == b || a.max(b) >= rules.len() {
             return;
         }
-        let (pa, pb) = (rules.get(a).and_then(Table::position), rules.get(b).and_then(Table::position));
+        let slot = |t: &Table| (t.position(), split_prefix(t).0);
+        let (sa, sb) = (slot(rules.get(a).expect("checked")), slot(rules.get(b).expect("checked")));
         let ta = rules.replace(a, Table::new());
-        let mut tb = rules.replace(b, ta);
-        tb.set_position(pa);
+        let tb = rules.replace(b, ta);
         rules.replace(a, tb);
-        if let Some(t) = rules.get_mut(b) {
-            t.set_position(pb);
+        for (i, (position, blank)) in [(a, sa), (b, sb)] {
+            let t = rules.get_mut(i).expect("index checked");
+            let comments = split_prefix(t).1;
+            t.set_position(position);
+            t.decor_mut().set_prefix(format!("{blank}{comments}"));
         }
     }
 
@@ -287,6 +299,14 @@ impl ConfigDoc {
         self.stamp = stamp(&self.path);
         Ok(())
     }
+}
+
+/// A table's prefix as (leading blank lines, the rest). The blank lines belong to the place in the
+/// file, the comments to the rule.
+fn split_prefix(t: &Table) -> (String, String) {
+    let prefix = t.decor().prefix().and_then(|p| p.as_str()).unwrap_or_default();
+    let rest = prefix.trim_start_matches(['\n', '\r', ' ', '\t']);
+    (prefix[..prefix.len() - rest.len()].to_string(), rest.to_string())
 }
 
 /// Insert or replace a top-level scalar without disturbing its comments.
@@ -392,6 +412,21 @@ mod tests {
         assert!(out.find("name = \"a\"").unwrap() < out.find("[ui]").unwrap(), "{out}");
         let rs = Ruleset::parse(&out).unwrap();
         assert_eq!(rs.len(), 2);
+    }
+
+    #[test]
+    fn move_rule_reorders_text_with_comments() {
+        let rule =
+            |n: &str| format!("# about {n}\n[[rule]]\nname = \"{n}\"\nhost = \"{n}.com\"\nopen = \"safari\"\n\n");
+        let mut d = doc(&["a", "b", "c", "d"].map(rule).concat());
+        let names = |d: &ConfigDoc| d.rules().into_iter().map(|r| r.name).collect::<Vec<_>>().join("");
+        d.move_rule(0, 2);
+        assert_eq!(names(&d), "bcad");
+        d.move_rule(3, 0);
+        assert_eq!(names(&d), "dbca");
+        let out = d.text();
+        assert!(out.starts_with("# about d\n[[rule]]\nname = \"d\""), "{out}");
+        assert_eq!(Ruleset::parse(&out).unwrap().len(), 4);
     }
 
     #[test]

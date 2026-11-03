@@ -27,6 +27,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
   "NSClipView", "NSTextField", "NSComboBox", "NSFont", "NSColor", "NSText", "NSGraphics",
   "NSActionCell", "NSTextFieldCell", "NSComboBoxCell", "NSButtonCell", "NSUserInterfaceLayout",
   "NSUserInterfaceItemIdentification", "NSTableHeaderView", "NSFontDescriptor",
+  "NSDragging", "NSPasteboard", "NSPasteboardItem", "NSTokenField", "NSTokenFieldCell",
+  "NSPopUpButton", "NSPopUpButtonCell", "NSMenuItemCell", "NSOpenPanel", "NSSavePanel", "NSPanel",
 ] }
 serde = { version = "1", features = ["derive"] }
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }

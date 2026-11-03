@@ -14,11 +14,11 @@ use objc2_app_kit::{
 use objc2_foundation::{NSDistributedNotificationCenter, NSNotification, NSObjectProtocol, NSString};
 
 use crate::OWN_BUNDLE_ID;
-use crate::agent::{Log, config_path};
+use crate::agent::{Log, Recent, config_path};
 use crate::browsers::{KNOWN, Target};
 use crate::config_edit::{ConfigDoc, Setting};
 use crate::menu::{self, Action, ConfigView, Entry, InstalledBrowser, MenuState};
-use crate::rules::Ruleset;
+use crate::rules::{Link, Ruleset};
 use crate::settings::SettingsController;
 use crate::{browsers, install, macos};
 
@@ -38,6 +38,7 @@ pub struct Ivars {
     /// The `Action::MakeDefaultBrowser` dialog is modal-ish; ignore re-entry while it's up.
     busy: Cell<bool>,
     settings: Retained<SettingsController>,
+    recent: Recent,
 }
 
 define_class!(
@@ -85,8 +86,9 @@ define_class!(
 
 impl MenuController {
     /// Create the controller, show the icon if `[ui] menu_bar`, and listen for reload requests.
-    pub fn install(mtm: MainThreadMarker, log: Log) -> Retained<Self> {
+    pub fn install(mtm: MainThreadMarker, log: Log, recent: Recent) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(Ivars {
+            recent,
             settings: SettingsController::new(mtm, log.clone()),
             log,
             status_item: RefCell::new(None),
@@ -151,7 +153,7 @@ impl MenuController {
     fn render(&self, menu: &NSMenu) {
         menu.removeAllItems();
         let mut actions = vec![];
-        for entry in menu::build(&snapshot()) {
+        for entry in menu::build(&snapshot(self.ivars().recent.list())) {
             menu.addItem(&self.item(entry, &mut actions));
         }
         *self.ivars().actions.borrow_mut() = actions;
@@ -230,6 +232,23 @@ impl MenuController {
                     log.line(format!("ERROR show log: {e}"));
                 }
             }
+            Action::OpenIn { url, target } => {
+                let target = match Target::parse(&target) {
+                    Ok(t) => t,
+                    Err(e) => return log.line(format!("ERROR menu: {e}")),
+                };
+                let (launch, warning) = browsers::plan(&target, url.clone());
+                if let Some(w) = warning {
+                    log.line(format!("WARN {w}"));
+                }
+                log.line(format!("menu: open {} in {target}", Link::parse(&url).redacted()));
+                let log = log.clone();
+                macos::open(&launch, move |result| {
+                    if let Err(e) = result {
+                        log.line(format!("ERROR opening with {target}: {e}"));
+                    }
+                });
+            }
             Action::Quit => NSApplication::sharedApplication(self.mtm()).terminate(None),
         }
     }
@@ -255,7 +274,7 @@ pub fn installed_browsers() -> Vec<InstalledBrowser> {
 }
 
 /// Everything the menu shows, read fresh each time it opens (a few `stat`s and two small reads).
-fn snapshot() -> MenuState {
+fn snapshot(recent: Vec<String>) -> MenuState {
     let browsers = installed_browsers();
     let config = match Ruleset::load(&config_path()) {
         Ok(rules) => {
@@ -264,7 +283,8 @@ fn snapshot() -> MenuState {
         }
         Err(e) => Err(e.to_string()),
     };
-    MenuState { browsers, config, is_default_browser: macos::default_browser().as_deref() == Some(OWN_BUNDLE_ID) }
+    let is_default_browser = macos::default_browser().as_deref() == Some(OWN_BUNDLE_ID);
+    MenuState { browsers, config, is_default_browser, recent }
 }
 
 fn open_with(flags: &[&str], path: &std::path::Path) -> Result<(), String> {

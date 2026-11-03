@@ -1,6 +1,6 @@
 # bopen UI plan
 
-Status: phases 1 to 4 implemented 2026-11-03 (config editing, menu bar, launch at login, settings window with rules editor and tester). Phase 5 ("Open last link in…", drag reorder, app-name tokens) is not started. Decisions: launch at login, menu bar icon on by default, no browser-picker popup.
+Status: all five phases implemented 2026-11-03. Decisions: launch at login, menu bar icon on by default, no browser-picker popup.
 
 Deviations found while implementing phases 1 and 2:
 - Launch at login is a LaunchAgent (`~/Library/LaunchAgents/dev.bopen.plist`, running `open -g` on the bundle) written by `bopen install`, not `SMAppService`. `SMAppService.mainApp` registers the *calling* bundle, so the CLI can't register the app, and it would leave the ad-hoc signing question open. The LaunchAgent needs neither.
@@ -10,12 +10,18 @@ Deviations found while implementing phases 1 and 2:
 
 Deviations in phases 3 and 4:
 - Two tabs (Rules, General) in an NSTabView, not four toolbar tabs. Browsers and Advanced were folded in: the open-in and default-browser combo boxes list installed browsers and profiles, and General has Open config file. `bopen browsers` and `bopen check` stay the detailed views.
-- Lists are comma-separated text fields, not NSTokenFields, and reordering uses ↑/↓ buttons, not drag. Both are phase 5 polish.
+- Only "is opened from" became an NSTokenField (phase 5); host, path and URL stay comma-separated text, since they hold patterns, not names.
 - Targets are typed into combo boxes in config spelling (`chrome:Work`, `us.zoom.xos`). The list offers every installed browser and profile plus every target the file already uses.
 - Text fields save when they lose focus or on Return, not on every keystroke, so a half-typed pattern is never validated.
 - While the window is open, bopen switches to a regular app (Dock icon, menu bar with Edit and Window menus), so ⌘C/⌘V/⌘W work. It switches back when the window closes.
 - `bopen settings` passes `BOPEN_SHOW_SETTINGS` to a fresh launch, and sends a reopen to a running agent.
 - `BOPEN_BUNDLE_ID=dev.bopen.test cargo build` builds a test copy that runs beside a real install. A shared bundle id let a test install stop the real agent.
+- General is the first tab and Rules the second, per macOS convention (user request).
+
+Phase 5:
+- "Open last link in" lists the newest link's browsers and profiles directly, with up to nine earlier links as submenus. Links come from `agent::Recent`, an in-memory ring of ten full URLs shared with the menu on the main thread.
+- Rules reorder by drag (`ConfigDoc::move_rule`, adjacent swaps) as well as ↑/↓. Blank lines stay with their place in the file; comments travel with their rule.
+- "is opened from" is a token field. Tokens hold config strings; bundle ids display as the installed app's name. A + pull-down lists running apps and "Choose app…" (NSOpenPanel).
 
 ## Goal
 

@@ -2,6 +2,7 @@
 //! `Action` back; everything decided here is testable without AppKit.
 
 use crate::browsers::{Family, KnownBrowser, ProfileInfo, Target};
+use crate::rules::Link;
 
 /// Snapshot taken each time the menu opens.
 pub struct MenuState {
@@ -10,6 +11,8 @@ pub struct MenuState {
     /// The config's `default`, or the error that kept the config from loading.
     pub config: Result<ConfigView, String>,
     pub is_default_browser: bool,
+    /// Recently routed links, newest first.
+    pub recent: Vec<String>,
 }
 
 pub struct InstalledBrowser {
@@ -47,6 +50,11 @@ pub enum Action {
     /// Config spelling, e.g. `chrome:Work`.
     SetDefault(String),
     SetPaused(bool),
+    /// Re-open a recent link with a target, bypassing the rules.
+    OpenIn {
+        url: String,
+        target: String,
+    },
     MakeDefaultBrowser,
     OpenSettings,
     OpenConfig,
@@ -78,6 +86,21 @@ pub fn build(state: &MenuState) -> Vec<Entry> {
     menu.extend(state.browsers.iter().map(|b| browser_entry(b, current)));
 
     menu.push(Entry::Separator);
+    if let Some((last, earlier)) = state.recent.split_first() {
+        // The newest link's browsers come first; older links nest below it.
+        let mut children = vec![Entry::Header(shorten(Link::parse(last).redacted(), 50))];
+        children.extend(open_in_entries(&state.browsers, last));
+        if !earlier.is_empty() {
+            children.push(Entry::Separator);
+            children.push(Entry::Header("Earlier links".into()));
+            children.extend(earlier.iter().map(|url| Entry::Submenu {
+                title: shorten(Link::parse(url).redacted(), 50),
+                checked: false,
+                children: open_in_entries(&state.browsers, url),
+            }));
+        }
+        menu.push(Entry::Submenu { title: "Open last link in".into(), checked: false, children });
+    }
     let paused = state.config.as_ref().is_ok_and(|c| c.paused);
     menu.push(Entry::Item { title: "Pause rules".into(), action: Action::SetPaused(!paused), checked: paused });
     menu.push(Entry::Separator);
@@ -94,6 +117,27 @@ fn shorten(s: &str, max: usize) -> String {
         Some((cut, _)) => format!("{}…", s[..cut].trim_end()),
         None => s.to_string(),
     }
+}
+
+/// Every installed browser and profile, each re-opening `url` there.
+fn open_in_entries(browsers: &[InstalledBrowser], url: &str) -> Vec<Entry> {
+    let item = |title: String, target: String| Entry::Item {
+        title,
+        action: Action::OpenIn { url: url.into(), target },
+        checked: false,
+    };
+    let mut entries = vec![];
+    for b in browsers {
+        entries.push(item(b.label.clone(), b.known.key.into()));
+        if let Ok(profiles) = &b.profiles {
+            entries.extend(
+                profiles
+                    .iter()
+                    .map(|p| item(format!("{} — {}", b.label, p.name), format!("{}:{}", b.known.key, p.name))),
+            );
+        }
+    }
+    entries
 }
 
 fn browser_entry(b: &InstalledBrowser, current: Option<&Target>) -> Entry {
@@ -151,6 +195,7 @@ mod tests {
             ],
             config: Ok(ConfigView { default: Target::parse(default).unwrap(), paused: false }),
             is_default_browser: true,
+            recent: vec![],
         }
     }
 
@@ -170,6 +215,27 @@ mod tests {
         assert_eq!(checked_actions(&build(&state("safari"))), vec![Action::SetDefault("safari".into())]);
         assert_eq!(checked_actions(&build(&state("chrome:work"))), vec![Action::SetDefault("chrome:Work".into())]);
         assert_eq!(checked_actions(&build(&state("chrome:Profile 1"))), vec![Action::SetDefault("chrome:Work".into())]);
+    }
+
+    #[test]
+    fn last_link_offers_every_browser_and_profile_then_earlier_links() {
+        let mut s = state("safari");
+        assert!(!build(&s).iter().any(|e| matches!(e, Entry::Submenu { title, .. } if title == "Open last link in")));
+        s.recent = vec!["https://new.com/a?token=x".into(), "https://old.com/b".into()];
+        let menu = build(&s);
+        let Some(Entry::Submenu { children, .. }) =
+            menu.iter().find(|e| matches!(e, Entry::Submenu { title, .. } if title == "Open last link in"))
+        else {
+            panic!("no recent submenu")
+        };
+        let open_in = |url: &str, target: &str| Action::OpenIn { url: url.into(), target: target.into() };
+        assert_eq!(children[0], Entry::Header("https://new.com/a".into()));
+        assert!(matches!(&children[1], Entry::Item { title, action, .. }
+            if title == "Safari" && *action == open_in("https://new.com/a?token=x", "safari")));
+        assert!(children.iter().any(|c| matches!(c, Entry::Item { action, .. }
+            if *action == open_in("https://new.com/a?token=x", "chrome:Work"))));
+        let Some(Entry::Submenu { title, .. }) = children.last() else { panic!("{children:?}") };
+        assert_eq!(title, "https://old.com/b");
     }
 
     #[test]

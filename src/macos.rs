@@ -90,9 +90,12 @@ pub fn run_agent(agent: Agent) -> ! {
             andEventID: GURL
         ];
     }
-    let log = handler.ivars().borrow().log.clone();
+    let (log, recent) = {
+        let agent = handler.ivars().borrow();
+        (agent.log.clone(), agent.recent.clone())
+    };
     log.line(format!("agent started (pid {})", std::process::id()));
-    let _menu = crate::ui::MenuController::install(mtm, log);
+    let _menu = crate::ui::MenuController::install(mtm, log, recent);
     app.run();
     std::process::exit(0)
 }

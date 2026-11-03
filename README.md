@@ -28,6 +28,7 @@ After each `cargo install`, run `bopen install` again. The command stops the run
 
 The icon (a branching arrow) shows:
 - the default browser, with a submenu of profiles for Chrome, Brave, Edge, Firefox and the rest;
+- **Open last link in**, which re-opens the link you just clicked (or one of the nine before it) in another browser or profile, for when a link lands in the wrong place;
 - **Pause rules**, which sends every link to the default until you turn it off;
 - **Settings…**, **Open config file**, **Show log** and **Quit bopen**;
 - a warning at the top when the config has an error or bopen is not the default browser. Click the warning to fix it.
@@ -38,11 +39,12 @@ Choosing a browser rewrites the `default = ...` line in your config and keeps yo
 
 Open it from the menu bar icon (**Settings…**), by double-clicking `bopen.app` while bopen runs, or with `bopen settings`.
 
-- **Rules tab.**
-  - The rule list is on the left, in the order bopen checks the rules. Use **+** and **−** to add and remove rules, and **↑** and **↓** to reorder them.
-  - The selected rule's conditions and target are on the right. Lists are comma-separated.
-  - **Test a link** at the bottom shows which rule a URL matches, optionally for a source app. It updates as you edit.
 - **General tab.** The default browser, a **Make bopen the default browser** button, and switches for the menu bar icon, Pause rules and Start at login.
+- **Rules tab.**
+  - The rule list is on the left, in the order bopen checks the rules. Drag a rule to reorder it, or use **↑** and **↓**. Use **+** and **−** to add and remove rules.
+  - The selected rule's conditions and target are on the right. Lists are comma-separated.
+  - In **is opened from**, apps show by name. The **+** next to it adds a running app, or any app via **Choose app…**; either way it stores the app's bundle id.
+  - **Test a link** at the bottom shows which rule a URL matches, optionally for a source app. It updates as you edit.
 
 Every change is saved to the config file as you make it, and your comments stay. If an edit would make the config invalid, the window shows the error and doesn't save it. Hand edits to the file show up when you switch back to the window.
 
@@ -117,7 +119,7 @@ bopen uninstall                          # make the config's default the default
 - The source app comes from the sender PID of the URL Apple Event. If that PID is unusable, bopen uses the frontmost app. Each log line says which method was used (`sender` or `frontmost`).
 - Profiles are selected by starting a short-lived second instance of the browser with `--profile-directory=<dir>` (Chromium browsers) or `-P <name>` (Firefox). The second instance passes the URL to the browser that is already running.
 - bopen always opens the URL somewhere. If the target fails, it tries the config's `default` with the original URL, then Safari. The `open` value can never be bopen itself, so a link can't loop back to bopen.
-- The log is `~/Library/Logs/bopen.log`. Query strings and fragments are removed before logging, so tokens in links are not written to disk.
+- The log is `~/Library/Logs/bopen.log`. Query strings and fragments are removed before logging, so tokens in links are not written to disk. The last ten full links are kept in memory only, for **Open last link in**.
 
 ## Known limitations
 

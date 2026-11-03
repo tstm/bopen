@@ -2,8 +2,11 @@
 //! Lives on the main thread inside the app delegate; nothing here is shared across threads
 //! except `Log::line`, which is a single O_APPEND write.
 
+use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::browsers::{self, Launch};
@@ -16,11 +19,38 @@ pub struct Agent {
     /// Invariant: always routable. A broken file never replaces a good ruleset.
     rules: Ruleset,
     pub log: Log,
+    pub recent: Recent,
+}
+
+/// The last links routed, newest first, for the menu's "Open last link in". Full URLs, kept in
+/// memory only: the log on disk stays redacted. Shared with the menu on the main thread.
+#[derive(Clone, Default)]
+pub struct Recent(Rc<RefCell<VecDeque<String>>>);
+
+const RECENT_MAX: usize = 10;
+
+impl Recent {
+    pub fn push(&self, url: &str) {
+        let mut links = self.0.borrow_mut();
+        links.retain(|u| u != url);
+        links.push_front(url.to_string());
+        links.truncate(RECENT_MAX);
+    }
+
+    pub fn list(&self) -> Vec<String> {
+        self.0.borrow().iter().cloned().collect()
+    }
 }
 
 impl Agent {
     pub fn new(log: Log) -> Self {
-        let mut agent = Agent { config_path: config_path(), stamp: None, rules: Ruleset::builtin(), log };
+        let mut agent = Agent {
+            config_path: config_path(),
+            stamp: None,
+            rules: Ruleset::builtin(),
+            log,
+            recent: Recent::default(),
+        };
         agent.refresh(true);
         agent
     }
@@ -37,6 +67,7 @@ impl Agent {
         }
         self.log.line(decision_line(req, &route, &launch));
         let original = req.link.as_str();
+        self.recent.push(original);
         let candidates =
             [launch, browsers::plan(self.rules.default_target(), original.into()).0, Launch::fallback(original)];
         let mut chain: Vec<Launch> = Vec::with_capacity(3);
@@ -158,6 +189,16 @@ fn rfc3339_utc(t: SystemTime) -> String {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn recent_is_newest_first_deduped_and_bounded() {
+        let r = Recent::default();
+        (0..12).map(|i| format!("https://e.com/{i}")).for_each(|u| r.push(&u));
+        r.push("https://e.com/5");
+        let list = r.list();
+        assert_eq!((list.len(), list[0].as_str(), list[1].as_str()), (10, "https://e.com/5", "https://e.com/11"));
+        assert_eq!(list.iter().filter(|u| u.ends_with("/5")).count(), 1);
+    }
 
     #[test]
     fn utc_formatting() {
