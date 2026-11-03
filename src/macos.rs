@@ -148,6 +148,17 @@ fn open_chain(mut chain: Vec<Launch>, log: Log) {
         return;
     }
     let launch = chain.remove(0);
+    let started = Instant::now();
+    match launch.try_handoff() {
+        Some(Ok(())) => {
+            let ms = started.elapsed().as_secs_f64() * 1000.0;
+            return log.line(format!("handed to running {} in {ms:.1} ms", launch.app().as_str()));
+        }
+        Some(Err(e)) => {
+            log.line(format!("hand-off to running {} failed ({e}); launching instead", launch.app().as_str()))
+        }
+        None => {}
+    }
     let what = launch.to_string();
     open(&launch, move |result| {
         if let Err(e) = result {

@@ -117,7 +117,8 @@ bopen uninstall                          # make the config's default the default
 
 - macOS starts `bopen.app` on the first click. The app then keeps running in the background, so later clicks cost only one `stat` of the config file plus the routing work.
 - The source app comes from the sender PID of the URL Apple Event. If that PID is unusable, bopen uses the frontmost app. Each log line says which method was used (`sender` or `frontmost`).
-- Profiles are selected by starting a short-lived second instance of the browser with `--profile-directory=<dir>` (Chromium browsers) or `-P <name>` (Firefox). The second instance passes the URL to the browser that is already running.
+- Chromium browsers (Chrome, Brave, Edge, Vivaldi, …) get a profile link through the browser's own single-instance socket: bopen sends it the same `--profile-directory=<dir> <url>` message a second Chrome process would, and the running browser opens the tab in that profile, in well under a millisecond. When the browser isn't running, bopen starts it with those arguments instead. The log says which happened (`handed to running …` or `hand-off … failed; launching instead`).
+- Firefox profiles (`-P <name>`) still start a short-lived second instance, which passes the URL to the running Firefox and exits. On a Mac with an on-access scanner such as Microsoft Defender, that launch can take seconds.
 - bopen always opens the URL somewhere. If the target fails, it tries the config's `default` with the original URL, then Safari. The `open` value can never be bopen itself, so a link can't loop back to bopen.
 - The log is `~/Library/Logs/bopen.log`. Query strings and fragments are removed before logging, so tokens in links are not written to disk. The last ten full links are kept in memory only, for **Open last link in**.
 

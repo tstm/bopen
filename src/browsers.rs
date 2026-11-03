@@ -2,6 +2,10 @@
 //! `Target` + URL into a concrete `Launch`. No AppKit. The only I/O is reading profile metadata.
 
 use std::fmt;
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::OWN_BUNDLE_ID;
 
@@ -173,7 +177,13 @@ pub enum Launch {
     OpenUrl { app: AppId, url: String },
     /// Start a short-lived new instance with these arguments. It hands the URL to the
     /// already-running browser (in the chosen profile) and exits.
-    NewInstance { app: AppId, args: Vec<String> },
+    NewInstance {
+        app: AppId,
+        args: Vec<String>,
+        /// Chromium's singleton socket. When the browser is running, writing `args` there does
+        /// what the new instance would, without starting one (see `try_handoff`).
+        handoff: Option<PathBuf>,
+    },
 }
 
 impl Launch {
@@ -185,6 +195,43 @@ impl Launch {
             Launch::OpenUrl { app, .. } | Launch::NewInstance { app, .. } => app,
         }
     }
+
+    /// Give the arguments straight to a running Chromium browser. None: this launch has no
+    /// socket. Err: the browser isn't running or didn't accept; start the new instance instead.
+    ///
+    /// Starting a second Chrome only to forward its command line costs a process launch
+    /// (~150 ms here, seconds under an on-access scanner such as Defender). The socket costs
+    /// well under a millisecond, and the browser activates itself as it would for the launch.
+    pub fn try_handoff(&self) -> Option<Result<(), String>> {
+        match self {
+            Launch::NewInstance { args, handoff: Some(socket), .. } => Some(chromium_handoff(socket, args)),
+            _ => None,
+        }
+    }
+}
+
+/// Chromium's ProcessSingleton protocol, as the second instance speaks it:
+/// `START\0<cwd>\0<argv0>\0<arg>...`, then the browser replies `ACK` (or `SHUTDOWN`).
+fn chromium_handoff(socket: &Path, args: &[String]) -> Result<(), String> {
+    // The socket in the profile directory is a symlink to a short temp path, as Chromium makes it:
+    // a socket address is limited to 104 bytes, which long home or browser paths exceed.
+    let target = match std::fs::read_link(socket) {
+        Ok(t) => socket.parent().map_or(t.clone(), |dir| dir.join(&t)),
+        Err(_) => socket.to_path_buf(),
+    };
+    let mut stream = UnixStream::connect(&target).map_err(|e| format!("{}: {e}", target.display()))?;
+    let timeout = Some(Duration::from_secs(2));
+    stream.set_read_timeout(timeout).and_then(|_| stream.set_write_timeout(timeout)).map_err(|e| e.to_string())?;
+    let message = ["START", "/", "bopen"].into_iter().chain(args.iter().map(String::as_str)).collect::<Vec<_>>();
+    stream.write_all(message.join("\0").as_bytes()).map_err(|e| format!("sending: {e}"))?;
+    stream.shutdown(std::net::Shutdown::Write).map_err(|e| e.to_string())?;
+    let mut reply = String::new();
+    stream.take(64).read_to_string(&mut reply).map_err(|e| format!("waiting for the browser: {e}"))?;
+    match reply.as_str() {
+        "ACK" => Ok(()),
+        "SHUTDOWN" => Err("the browser is shutting down".into()),
+        other => Err(format!("unexpected reply {other:?}")),
+    }
 }
 
 impl fmt::Display for Launch {
@@ -192,7 +239,7 @@ impl fmt::Display for Launch {
         match self {
             Launch::OpenUrl { app, .. } => write!(f, "{}", app.as_str()),
             // The URL is the last argument; leave it out so logs stay redacted.
-            Launch::NewInstance { app, args } => write!(f, "{} {:?}", app.as_str(), &args[..args.len() - 1]),
+            Launch::NewInstance { app, args, .. } => write!(f, "{} {:?}", app.as_str(), &args[..args.len() - 1]),
         }
     }
 }
@@ -209,16 +256,30 @@ pub fn plan(target: &Target, url: String) -> (Launch, Option<String>) {
     let listed = profiles(browser);
     let found = listed.as_ref().ok().and_then(|ps| ps.iter().find(|p| p.matches(wanted)).cloned());
     match (&browser.family, found) {
-        (Family::Chromium { .. }, Some(p)) => {
-            (Launch::NewInstance { app, args: vec![format!("--profile-directory={}", p.dir), url] }, None)
-        }
+        (Family::Chromium { support_dir }, Some(p)) => (
+            Launch::NewInstance {
+                app,
+                args: vec![format!("--profile-directory={}", p.dir), url],
+                handoff: Some(support_path(support_dir, "SingletonSocket")),
+            },
+            None,
+        ),
         // Chromium creates a new profile for an unknown directory, so only pass names that are
         // certainly directories, and only when there is no list to check them against.
-        (Family::Chromium { .. }, None) if listed.as_ref().map_or(true, Vec::is_empty) && is_chromium_dir(wanted) => {
-            (Launch::NewInstance { app, args: vec![format!("--profile-directory={wanted}"), url] }, None)
+        (Family::Chromium { support_dir }, None)
+            if listed.as_ref().map_or(true, Vec::is_empty) && is_chromium_dir(wanted) =>
+        {
+            (
+                Launch::NewInstance {
+                    app,
+                    args: vec![format!("--profile-directory={wanted}"), url],
+                    handoff: Some(support_path(support_dir, "SingletonSocket")),
+                },
+                None,
+            )
         }
         (Family::Firefox { .. }, Some(p)) => {
-            (Launch::NewInstance { app, args: vec!["-P".into(), p.name, "-new-tab".into(), url] }, None)
+            (Launch::NewInstance { app, args: vec!["-P".into(), p.name, "-new-tab".into(), url], handoff: None }, None)
         }
         // NoProfiles never carries a profile (Target::parse rejects it), so this is "not found".
         _ => {
@@ -259,6 +320,11 @@ impl ProfileInfo {
     }
 }
 
+/// `~/Library/Application Support/<support_dir>/<file>`: the browser's user data directory.
+fn support_path(support_dir: &str, file: &str) -> PathBuf {
+    crate::agent::home().join("Library/Application Support").join(support_dir).join(file)
+}
+
 /// Profiles on disk for a browser. Ok(empty) if the browser has none or was never run;
 /// Err if the list exists but can't be read (typically macOS's app-data privacy protection).
 /// Read fresh each time (~1 ms) so profiles created or renamed later just work.
@@ -268,7 +334,7 @@ pub fn profiles(browser: &KnownBrowser) -> Result<Vec<ProfileInfo>, String> {
         Family::Chromium { support_dir } => (support_dir, "Local State", parse_local_state),
         Family::Firefox { support_dir } => (support_dir, "profiles.ini", parse_profiles_ini),
     };
-    let path = crate::agent::home().join("Library/Application Support").join(support_dir).join(file);
+    let path = support_path(support_dir, file);
     match std::fs::read_to_string(&path) {
         Ok(text) => Ok(parse(&text)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
@@ -324,6 +390,62 @@ fn parse_profiles_ini(ini: &str) -> Vec<ProfileInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stand-in for Chrome's singleton socket: records what it was sent, answers `reply`.
+    fn fake_browser(name: &str, reply: &'static str) -> (PathBuf, std::thread::JoinHandle<String>) {
+        let dir = std::env::temp_dir().join(format!("bopen-sock-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("SingletonSocket");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut got = String::new();
+            conn.read_to_string(&mut got).unwrap();
+            conn.write_all(reply.as_bytes()).unwrap();
+            got
+        });
+        (socket, server)
+    }
+
+    fn handoff_launch(socket: Option<PathBuf>) -> Launch {
+        Launch::NewInstance {
+            app: AppId::new("com.google.Chrome").unwrap(),
+            args: vec!["--profile-directory=Profile 1".into(), "https://e.com/?q=1".into()],
+            handoff: socket,
+        }
+    }
+
+    #[test]
+    fn handoff_speaks_chromiums_singleton_protocol() {
+        let (socket, server) = fake_browser("ack", "ACK");
+        assert_eq!(handoff_launch(Some(socket)).try_handoff(), Some(Ok(())));
+        assert_eq!(server.join().unwrap(), "START\0/\0bopen\0--profile-directory=Profile 1\0https://e.com/?q=1");
+    }
+
+    #[test]
+    fn handoff_follows_the_symlink_like_chromium_does() {
+        let (socket, server) = fake_browser("link", "ACK");
+        let long_dir = std::env::temp_dir().join(format!("bopen-{}-{}", std::process::id(), "x".repeat(90)));
+        std::fs::create_dir_all(&long_dir).unwrap();
+        let link = long_dir.join("SingletonSocket");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&socket, &link).unwrap();
+        assert!(link.as_os_str().len() > 104);
+        assert_eq!(handoff_launch(Some(link)).try_handoff(), Some(Ok(())));
+        server.join().unwrap();
+        std::fs::remove_dir_all(long_dir).unwrap();
+    }
+
+    #[test]
+    fn handoff_failures_fall_back_to_launching() {
+        let (socket, server) = fake_browser("shutdown", "SHUTDOWN");
+        assert!(handoff_launch(Some(socket.clone())).try_handoff().unwrap().unwrap_err().contains("shutting down"));
+        server.join().unwrap();
+        std::fs::remove_file(&socket).unwrap();
+        assert!(handoff_launch(Some(socket)).try_handoff().unwrap().is_err());
+        assert_eq!(handoff_launch(None).try_handoff(), None);
+    }
 
     #[test]
     fn target_parse() {

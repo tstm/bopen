@@ -94,6 +94,7 @@ These are accepted deviations from the c1 sketch. Each was surfaced by running t
 - `check` dropped the "installed binary == this build" comparison. `codesign` rewrites the bundled binary, so the comparison always failed.
 - The `bopen agent` foreground subcommand was dropped. LaunchServices delivers events to the bundle, not to a terminal process, so `bopen log -f` covers the same need.
 - `loginwindow` is excluded as a frontmost source. It is frontmost while the screen is locked.
+- Chromium profile links skip the second process when the browser is running (2026-11-03, after the user reported multi-second delays on a Mac with Microsoft Defender). `Launch::NewInstance` carries the browser's `SingletonSocket`. `try_handoff` writes Chromium's ProcessSingleton message (`START\0<cwd>\0<argv0>\0<args>…`) and waits for `ACK`; any failure (not running, stale socket, `SHUTDOWN`, timeout) falls through to the old launch. Measured here: launching the second instance took 170–730 ms until LaunchServices reported it; the hand-off takes 0.1–0.4 ms, and Chrome activates its own window. The socket in the profile directory is a symlink to a short temp path, because socket addresses are limited to 104 bytes; bopen follows it, as Chromium does.
 
 ## Open questions and risks
 

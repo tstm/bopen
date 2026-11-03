@@ -183,8 +183,17 @@ fn route_cmd(config: &Path, args: &[String], really: bool) -> Result<(), String>
     }
     println!("  launch: {}", describe(&launch));
     if really {
+        let started = std::time::Instant::now();
+        match launch.try_handoff() {
+            Some(Ok(())) => {
+                println!("handed to the running browser in {:.1} ms", started.elapsed().as_secs_f64() * 1000.0);
+                return Ok(());
+            }
+            Some(Err(e)) => println!("hand-off failed ({e}); launching instead"),
+            None => {}
+        }
         macos::open_blocking(&launch)?;
-        println!("opened");
+        println!("opened in {:.0} ms", started.elapsed().as_secs_f64() * 1000.0);
     }
     Ok(())
 }
@@ -193,7 +202,10 @@ fn describe(launch: &Launch) -> String {
     let path = macos::app_path(launch.app()).map_or("NOT INSTALLED".into(), |p| p.display().to_string());
     match launch {
         Launch::OpenUrl { app, .. } => format!("{} ({path})", app.as_str()),
-        Launch::NewInstance { app, args } => format!("{} {args:?} ({path})", app.as_str()),
+        Launch::NewInstance { app, args, handoff } => {
+            let via = handoff.as_ref().map_or(String::new(), |s| format!("; via {} when running", s.display()));
+            format!("{} {args:?} ({path}{via})", app.as_str())
+        }
     }
 }
 
