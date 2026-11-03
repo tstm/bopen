@@ -1,0 +1,32 @@
+[package]
+name = "bopen"
+version = "0.1.0"
+edition = "2024"
+description = "Route every link you click on macOS to the right browser, profile, or app"
+license = "MIT"
+
+# Every dependency earns its place:
+#   objc2 + objc2-foundation + objc2-app-kit + block2 : run loop, Apple Events, NSWorkspace
+#   toml + serde                                      : config (parse only)
+#   serde_json                                        : Chromium "Local State" profile lookup
+# Deliberately absent: clap, chrono, regex, url, notify, log/tracing.
+[dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std", "NSAppleEventDescriptor", "NSAppleEventManager", "NSString", "NSURL", "NSArray",
+  "NSError", "NSObject", "NSRunLoop", "NSDate", "NSBundle", "NSEnumerator", "block2",
+] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "std", "NSApplication", "NSRunningApplication", "NSWorkspace", "NSEvent", "NSResponder",
+  "block2", "libc",
+] }
+serde = { version = "1", features = ["derive"] }
+toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,81 @@
+# ~/.config/bopen/config.toml
+#
+# bopen picks a browser, browser profile, or app for every link you click.
+# Changes apply on the next click; no restart needed. Validate with `bopen check`,
+# try a link with `bopen test <url> --from Slack`.
+#
+# Rules are checked top to bottom. The FIRST rule whose conditions all match wins.
+# If no rule matches, `default` is used.
+#
+# Conditions (each optional, but a rule needs at least one; a list means "any of"):
+#   from      = app the link was clicked in: bundle id or app name, case-insensitive
+#               ("Slack", "com.tinyspeck.slackmacgap"). Click a link, then run `bopen log`
+#               to see what an app is called.
+#   host      = "example.com" matches example.com AND all of its subdomains.
+#               "=example.com" matches only exactly example.com.
+#               A pattern with * is a glob over the whole host ("*.atlassian.net").
+#   path      = glob over the URL path ("/j/*"). Each * is captured as {1}, {2}, ... for `rewrite`.
+#   url       = glob over the whole URL ("https://github.com/acme/*").
+#   modifiers = keys that must be held while clicking: "option", "shift", "command", "control".
+#
+# Actions:
+#   open      = "safari" | "chrome" | "chrome:Work" | "brave:Personal" | "firefox:dev-edition"
+#               or "<bundle id>" for any other app ("us.zoom.xos").
+#               After ':' comes the profile: the name shown in the browser ("Work"),
+#               its directory ("Profile 1"), or the signed-in account email.
+#               `bopen browsers` lists browsers and their profiles.
+#   rewrite   = optional new URL to open instead. Placeholders:
+#               {url} {scheme} {host} {path} {query} and {1}..{9} from `path`.
+
+default = "safari"
+
+# Escape hatch: hold Option while clicking to force Safari, whatever the link.
+[[rule]]
+name = "option forces safari"
+modifiers = ["option"]
+open = "safari"
+
+# Meeting links go straight to the native apps, even when clicked in Slack,
+# so these come before the Slack rule.
+[[rule]]
+name = "zoom in zoom.app"
+host = "zoom.us"
+path = "/j/*"
+rewrite = "zoommtg://zoom.us/join?confno={1}&{query}"
+open = "us.zoom.xos"
+
+[[rule]]
+name = "teams in teams.app"
+host = "teams.microsoft.com"
+path = "/l/*"
+rewrite = "msteams:{path}?{query}"
+open = "com.microsoft.teams2"
+
+# Everything clicked in work chat and mail opens in the Chrome "Work" profile.
+[[rule]]
+name = "work apps"
+from = ["Slack", "com.microsoft.teams2", "com.microsoft.Outlook"]
+open = "chrome:Work"
+
+# Work domains open in the Work profile wherever they were clicked.
+[[rule]]
+name = "work domains"
+host = ["acme.com", "*.atlassian.net", "console.aws.amazon.com"]
+open = "chrome:Work"
+
+# Conditions in one rule must ALL match, so a different kind of match needs its own rule.
+[[rule]]
+name = "work github"
+url = ["https://github.com/acme", "https://github.com/acme/*"]
+open = "chrome:Work"
+
+# Personal stuff goes to Safari.
+[[rule]]
+name = "personal"
+from = ["com.apple.mail", "Messages"]
+open = "safari"
+
+[[rule]]
+name = "media"
+host = ["youtube.com", "netflix.com", "music.apple.com"]
+open = "safari"
