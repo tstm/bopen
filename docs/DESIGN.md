@@ -1,4 +1,4 @@
-# bopen design
+# Bopen design
 
 ## Problem
 
@@ -9,7 +9,7 @@ Six constraints shape the design:
 - LaunchServices only delivers URLs to an `.app` that declares `CFBundleURLTypes`. There is no Xcode, so the bundle is assembled by hand and ad-hoc signed.
 - URLs arrive as a `GURL` Apple Event in a running `NSApplication`. The source app is available only through the event's `keySenderPIDAttr`, which can be 0, an exited process (the `open` CLI), or an intermediary.
 - Chrome selects profiles by directory (`--profile-directory=Profile 1`). The mapping from human names to directories lives in `Local State` JSON, which newer macOS versions can block from being read (app-data privacy protection).
-- Opening a link with "the default browser" would open it with bopen itself and loop forever.
+- Opening a link with "the default browser" would open it with Bopen itself and loop forever.
 - Every failure must still open the link somewhere and leave a log line.
 - Minimal dependencies and a single binary.
 
@@ -45,11 +45,11 @@ let (launch, warning) = browsers::plan(route.target, route.url.clone());
 
 The load-bearing decisions:
 
-- **Types encode invariants.** A `Ruleset` exists only after `parse`, which rejects unknown keys, rules with no conditions, out-of-range `{n}` captures, profiles on Safari, and bopen as a target. `AppId::new` refuses bopen's bundle id, and `Launch` holds only an `AppId`, so a loop can't be expressed. Per type-system-discipline.
+- **Types encode invariants.** A `Ruleset` exists only after `parse`, which rejects unknown keys, rules with no conditions, out-of-range `{n}` captures, profiles on Safari, and Bopen as a target. `AppId::new` refuses Bopen's bundle id, and `Launch` holds only an `AppId`, so a loop can't be expressed. Per type-system-discipline.
 - **One browser list.** `KNOWN` drives target parsing, error messages, `bopen browsers`, and profile discovery. A test checks the example config mentions the main keys.
 - **Pure core.** `route` and `plan` are the only decision logic, and both the agent and `bopen test` call them. The objc2 surface is `macos.rs`, `ui.rs` and `settings.rs`. Per boundary-discipline.
 - **Resident agent, no watcher.** One `stat` per click, a re-parse only on change, and the last good config kept when a save is broken. There are no threads, no FSEvents, and no locks. NSWorkspace completion handlers only log and start the next fallback. Per separate-before-serializing-shared-state.
-- **Idempotent install.** `bopen install` stops the old agent, builds in `bopen.app.tmp`, signs it, swaps it into place, and registers it. Running it again is the upgrade path. Per make-operations-idempotent.
+- **Idempotent install.** `bopen install` stops the old agent, builds in `Bopen.app.tmp`, signs it, swaps it into place, and registers it. Running it again is the upgrade path. Per make-operations-idempotent.
 
 What it deliberately does not do: scripting, regex, URL un-shortening, a file watcher, Safari profiles, or a "system default" target.
 
@@ -94,11 +94,11 @@ These are accepted deviations from the c1 sketch. Each was surfaced by running t
 - `check` dropped the "installed binary == this build" comparison. `codesign` rewrites the bundled binary, so the comparison always failed.
 - The `bopen agent` foreground subcommand was dropped. LaunchServices delivers events to the bundle, not to a terminal process, so `bopen log -f` covers the same need.
 - `loginwindow` is excluded as a frontmost source. It is frontmost while the screen is locked.
-- Chromium profile links skip the second process when the browser is running (2026-11-03, after the user reported multi-second delays on a Mac with Microsoft Defender). `Launch::NewInstance` carries the browser's `SingletonSocket`. `try_handoff` writes Chromium's ProcessSingleton message (`START\0<cwd>\0<argv0>\0<args>…`) and waits for `ACK`; any failure (not running, stale socket, `SHUTDOWN`, timeout) falls through to the old launch. Measured here: launching the second instance took 170–730 ms until LaunchServices reported it; the hand-off takes 0.1–0.4 ms, and Chrome activates its own window. The socket in the profile directory is a symlink to a short temp path, because socket addresses are limited to 104 bytes; bopen follows it, as Chromium does.
+- Chromium profile links skip the second process when the browser is running (2026-11-03, after the user reported multi-second delays on a Mac with Microsoft Defender). `Launch::NewInstance` carries the browser's `SingletonSocket`. `try_handoff` writes Chromium's ProcessSingleton message (`START\0<cwd>\0<argv0>\0<args>…`) and waits for `ACK`; any failure (not running, stale socket, `SHUTDOWN`, timeout) falls through to the old launch. Measured here: launching the second instance took 170–730 ms until LaunchServices reported it; the hand-off takes 0.1–0.4 ms, and Chrome activates its own window. The socket in the profile directory is a symlink to a short temp path, because socket addresses are limited to 104 bytes; Bopen follows it, as Chromium does.
 
 ## Open questions and risks
 
-- Does the real `~/Applications/bopen.app` get a privacy prompt when it reads Chrome's `Local State`? If it does, does that prompt block the click until the user answers?
+- Does the real `~/Applications/Bopen.app` get a privacy prompt when it reads Chrome's `Local State`? If it does, does that prompt block the click until the user answers?
 - Is `keySenderPIDAttr` populated with the clicking app for Slack, Mail, and Messages? The spike verified the mechanism only with the `open` CLI as the sender.
 - Does `setDefaultApplicationAtURL` accept an ad-hoc-signed app on macOS 27? This is untested, because it changes the user's default browser.
 - Does the notification posted through `osascript` actually display from an LSUIElement agent?

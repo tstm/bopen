@@ -74,7 +74,7 @@ pub fn build(state: &MenuState) -> Vec<Entry> {
     }
     if !state.is_default_browser {
         menu.push(Entry::Item {
-            title: "⚠ bopen is not the default browser…".into(),
+            title: "⚠ Bopen is not the default browser…".into(),
             action: Action::MakeDefaultBrowser,
             checked: false,
         });
@@ -107,7 +107,7 @@ pub fn build(state: &MenuState) -> Vec<Entry> {
     menu.push(Entry::Item { title: "Settings…".into(), action: Action::OpenSettings, checked: false });
     menu.push(Entry::Item { title: "Open config file".into(), action: Action::OpenConfig, checked: false });
     menu.push(Entry::Item { title: "Show log".into(), action: Action::ShowLog, checked: false });
-    menu.push(Entry::Item { title: "Quit bopen".into(), action: Action::Quit, checked: false });
+    menu.push(Entry::Item { title: "Quit Bopen".into(), action: Action::Quit, checked: false });
     menu
 }
 

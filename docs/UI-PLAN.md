@@ -1,4 +1,4 @@
-# bopen UI plan
+# Bopen UI plan
 
 Status: all five phases implemented 2026-11-03. Decisions: launch at login, menu bar icon on by default, no browser-picker popup.
 
@@ -13,7 +13,7 @@ Deviations in phases 3 and 4:
 - Only "is opened from" became an NSTokenField (phase 5); host, path and URL stay comma-separated text, since they hold patterns, not names.
 - Targets are typed into combo boxes in config spelling (`chrome:Work`, `us.zoom.xos`). The list offers every installed browser and profile plus every target the file already uses.
 - Text fields save when they lose focus or on Return, not on every keystroke, so a half-typed pattern is never validated.
-- While the window is open, bopen switches to a regular app (Dock icon, menu bar with Edit and Window menus), so ⌘C/⌘V/⌘W work. It switches back when the window closes.
+- While the window is open, Bopen switches to a regular app (Dock icon, menu bar with Edit and Window menus), so ⌘C/⌘V/⌘W work. It switches back when the window closes.
 - `bopen settings` passes `BOPEN_SHOW_SETTINGS` to a fresh launch, and sends a reopen to a running agent.
 - `BOPEN_BUNDLE_ID=dev.bopen.test cargo build` builds a test copy that runs beside a real install. A shared bundle id let a test install stop the real agent.
 - General is the first tab and Rules the second, per macOS convention (user request).
@@ -101,11 +101,11 @@ Today LaunchServices starts the agent on the first click. A menu bar icon has to
 
 ## Preferences window
 
-A single NSWindow with an NSToolbar tab style. It is created lazily on first open and hidden on close, never destroyed. It opens from the menu, from `⌘,`, by double-clicking `bopen.app` in Finder (handle the reopen Apple Event `aevt/rapp`), and from a new `bopen prefs` CLI command, which runs `open ~/Applications/bopen.app` and triggers that same reopen event.
+A single NSWindow with an NSToolbar tab style. It is created lazily on first open and hidden on close, never destroyed. It opens from the menu, from `⌘,`, by double-clicking `Bopen.app` in Finder (handle the reopen Apple Event `aevt/rapp`), and from a new `bopen prefs` CLI command, which runs `open ~/Applications/Bopen.app` and triggers that same reopen event.
 
 ### General
 - Default browser popup (the same list as the menu).
-- "bopen is the default browser" status, with a **Make default** button (`set_default_browser`).
+- "Bopen is the default browser" status, with a **Make default** button (`set_default_browser`).
 - Show menu bar icon, Launch at login, Pause rules.
 
 ### Rules (the main tab)

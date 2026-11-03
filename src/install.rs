@@ -1,4 +1,4 @@
-//! Assemble, sign, and register `~/Applications/bopen.app` from the running binary. No Xcode.
+//! Assemble, sign, and register `~/Applications/Bopen.app` from the running binary. No Xcode.
 //! Every step is idempotent; re-running `bopen install` after `cargo install` upgrades in place.
 
 use std::path::{Path, PathBuf};
@@ -14,7 +14,7 @@ const LSREGISTER: &str =
     "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
 pub fn app_path() -> PathBuf {
-    home().join("Applications/bopen.app")
+    home().join("Applications/Bopen.app")
 }
 
 /// In order; each step is safe to repeat, and a crash between steps leaves either the old or the
@@ -43,21 +43,21 @@ pub fn install(set_default: bool) -> Result<(), String> {
 
     ensure_config()?;
     write_login_item(&app)?;
-    println!("bopen will start at login ({})", login_item_path().display());
+    println!("Bopen will start at login ({})", login_item_path().display());
 
     let started = run("/usr/bin/open", &["-g", path_str(&app)?]);
     if let Err(e) = started {
-        println!("note: couldn't start bopen now ({e}); it starts on the next click or login");
+        println!("note: couldn't start Bopen now ({e}); it starts on the next click or login");
     }
 
     if !set_default {
-        println!("skipped making bopen the default browser (run `bopen set-default` when ready)");
+        println!("skipped making Bopen the default browser (run `bopen set-default` when ready)");
     } else if macos::default_browser().as_deref() == Some(OWN_BUNDLE_ID) {
-        println!("bopen is already the default browser");
+        println!("Bopen is already the default browser");
     } else {
-        println!("asking macOS to make bopen the default browser; confirm the dialog...");
+        println!("asking macOS to make Bopen the default browser; confirm the dialog...");
         macos::set_default_browser(&app)?;
-        println!("bopen is now the default browser");
+        println!("Bopen is now the default browser");
     }
     Ok(())
 }
@@ -169,8 +169,8 @@ fn info_plist(version: &str) -> String {
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key><string>{OWN_BUNDLE_ID}</string>
-  <key>CFBundleName</key><string>bopen</string>
-  <key>CFBundleDisplayName</key><string>bopen</string>
+  <key>CFBundleName</key><string>Bopen</string>
+  <key>CFBundleDisplayName</key><string>Bopen</string>
   <key>CFBundleExecutable</key><string>bopen</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>{version}</string>
@@ -232,8 +232,8 @@ mod tests {
 
     #[test]
     fn login_item_opens_the_bundle_in_the_background() {
-        let p = login_item_plist("/Users/a&b/Applications/bopen.app");
-        assert!(p.contains("<string>-g</string><string>/Users/a&amp;b/Applications/bopen.app</string>"), "{p}");
+        let p = login_item_plist("/Users/a&b/Applications/Bopen.app");
+        assert!(p.contains("<string>-g</string><string>/Users/a&amp;b/Applications/Bopen.app</string>"), "{p}");
         assert!(p.contains("<key>RunAtLoad</key><true/>"));
     }
 

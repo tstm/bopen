@@ -1,6 +1,6 @@
 //! bopen: macOS URL router. One binary, two modes.
 //!
-//! - **Agent mode**: started by LaunchServices from `~/Applications/bopen.app` with no subcommand
+//! - **Agent mode**: started by LaunchServices from `~/Applications/Bopen.app` with no subcommand
 //!   (possibly a legacy `-psn_*` arg). Runs the NSApplication loop forever and routes every URL.
 //! - **CLI mode**: anything else. See `cli.rs`.
 

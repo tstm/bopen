@@ -74,7 +74,7 @@ define_class!(
     }
 
     unsafe impl NSApplicationDelegate for MenuController {
-        /// Double-clicking bopen.app (or `bopen settings`) while it runs opens the settings.
+        /// Double-clicking Bopen.app (or `bopen settings`) while it runs opens the settings.
         #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
         fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
             self.apply_settings();
@@ -134,14 +134,14 @@ impl MenuController {
         if let Some(button) = item.button(mtm) {
             let symbol = NSImage::imageWithSystemSymbolName_accessibilityDescription(
                 &NSString::from_str("arrow.triangle.branch"),
-                Some(&NSString::from_str("bopen")),
+                Some(&NSString::from_str("Bopen")),
             );
             match symbol {
                 Some(img) => {
                     img.setTemplate(true);
                     button.setImage(Some(&img));
                 }
-                None => button.setTitle(&NSString::from_str("bopen")),
+                None => button.setTitle(&NSString::from_str("Bopen")),
             }
         }
         let menu = NSMenu::new(mtm);
@@ -205,7 +205,7 @@ impl MenuController {
             });
             if let Err(e) = result {
                 log.line(format!("ERROR menu: {e}"));
-                crate::agent::notify("bopen: setting not saved", &e);
+                crate::agent::notify("Bopen: setting not saved", &e);
             }
         };
         match action {

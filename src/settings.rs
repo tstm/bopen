@@ -559,9 +559,9 @@ impl SettingsController {
         set_text(
             &w.default_status,
             if is_default {
-                "bopen is the default browser, so it sees every link you click."
+                "Bopen is the default browser, so it sees every link you click."
             } else {
-                "bopen is not the default browser, so links bypass it."
+                "Bopen is not the default browser, so links bypass it."
             },
         );
         w.make_default.setEnabled(!is_default);
@@ -630,7 +630,7 @@ impl SettingsController {
             )
         };
         unsafe { window.setReleasedWhenClosed(false) };
-        window.setTitle(&NSString::from_str("bopen Settings"));
+        window.setTitle(&NSString::from_str("Bopen Settings"));
         window.setDelegate(Some(ProtocolObject::from_ref(self)));
 
         let tabs = NSTabView::initWithFrame(NSTabView::alloc(mtm), rect(10.0, 10.0, 760.0, 570.0));
@@ -757,7 +757,7 @@ impl SettingsController {
         );
         let default_status = b.label("", rect(180.0, grow(30.0), 520.0, 18.0), false);
         let make_default =
-            b.button("Make bopen the default browser", sel!(makeDefault:), rect(176.0, grow(48.0), 260.0, 28.0));
+            b.button("Make Bopen the default browser", sel!(makeDefault:), rect(176.0, grow(48.0), 260.0, 28.0));
         let menu_bar =
             b.checkbox("Show the menu bar icon", sel!(menuBarChanged:), rect(180.0, grow(30.0), 400.0, 22.0));
         let paused = b.checkbox(
@@ -765,7 +765,7 @@ impl SettingsController {
             sel!(pausedChanged:),
             rect(180.0, grow(30.0), 500.0, 22.0),
         );
-        let login = b.checkbox("Start bopen at login", sel!(loginChanged:), rect(180.0, grow(48.0), 400.0, 22.0));
+        let login = b.checkbox("Start Bopen at login", sel!(loginChanged:), rect(180.0, grow(48.0), 400.0, 22.0));
         let open_config = b.button("Open config file", sel!(openConfig:), rect(176.0, grow(40.0), 180.0, 28.0));
         let general_status = b.wrapping_label(rect(20.0, 20.0, 700.0, 60.0));
         let general: [&NSView; 8] =
@@ -932,7 +932,7 @@ fn main_menu(mtm: MainThreadMarker) -> Retained<NSMenu> {
     let redo = item("Redo", Some(sel!(redo:)), "z");
     redo.setKeyEquivalentModifierMask(NSEventModifierFlags::Command | NSEventModifierFlags::Shift);
     let bar = NSMenu::new(mtm);
-    bar.addItem(&submenu("bopen", vec![item("Quit bopen", Some(sel!(terminate:)), "q")]));
+    bar.addItem(&submenu("Bopen", vec![item("Quit Bopen", Some(sel!(terminate:)), "q")]));
     bar.addItem(&submenu(
         "Edit",
         vec![

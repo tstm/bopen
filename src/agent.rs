@@ -98,7 +98,7 @@ impl Agent {
             }
             Err(e) => {
                 self.log.line(format!("ERROR config {}: {e} (keeping previous rules)", self.config_path.display()));
-                notify("bopen: config not loaded", &e.to_string());
+                notify("Bopen: config not loaded", &e.to_string());
             }
         }
     }

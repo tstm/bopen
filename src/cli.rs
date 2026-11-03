@@ -15,7 +15,7 @@ const HELP: &str = "\
 bopen: route every link you click to the right browser, profile, or app.
 
 usage:
-  bopen install [--no-default]   build ~/Applications/bopen.app, write an example config,
+  bopen install [--no-default]   build ~/Applications/Bopen.app, write an example config,
                                  and ask macOS to make bopen the default browser
   bopen set-default              ask macOS again to make bopen the default browser
   bopen uninstall                hand the default back to your `default` browser, remove the app

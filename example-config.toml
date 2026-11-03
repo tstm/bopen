@@ -1,6 +1,6 @@
 # ~/.config/bopen/config.toml
 #
-# bopen picks a browser, browser profile, or app for every link you click.
+# Bopen picks a browser, browser profile, or app for every link you click.
 # Changes apply on the next click; no restart needed. Validate with `bopen check`,
 # try a link with `bopen test <url> --from Slack`.
 #
