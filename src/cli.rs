@@ -6,6 +6,7 @@ use std::process::{Command, ExitCode};
 use crate::OWN_BUNDLE_ID;
 use crate::agent::{self, config_path, decision_line};
 use crate::browsers::{self, KNOWN, Launch, Target};
+use crate::config_edit::{ConfigDoc, Setting};
 use crate::install;
 use crate::macos;
 use crate::rules::{Link, Modifiers, Request, Ruleset, SourceApp, SourceVia};
@@ -26,6 +27,9 @@ usage:
 
   --config tries a config file before you save over the live one; the agent
   itself always reads ~/.config/bopen/config.toml.
+  bopen default <target>         set `default` (e.g. chrome:Work), keeping the file's comments
+  bopen pause | resume           send every link to `default` / use the rules again
+  bopen menu-bar on|off          show or hide the menu bar icon
   bopen browsers                 installed browsers and their profiles
   bopen log [-f]                 recent routing decisions (or follow them)
   bopen config                   print the config file path
@@ -51,6 +55,21 @@ pub fn run(args: Vec<String>) -> ExitCode {
         }),
         "test" => with_config(rest).and_then(|(path, rest)| route_cmd(&path, &rest, false)),
         "open" => with_config(rest).and_then(|(path, rest)| route_cmd(&path, &rest, true)),
+        "default" => match rest {
+            [target] => edit(|doc| doc.set_default(target)).map(|_| println!("default = {target:?}")),
+            _ => Err("usage: bopen default <target>".into()),
+        },
+        "pause" => {
+            edit(|doc| doc.set(Setting::Paused, true)).map(|_| println!("paused: every link opens in `default`"))
+        }
+        "resume" => edit(|doc| doc.set(Setting::Paused, false)).map(|_| println!("rules active")),
+        "menu-bar" => match rest.first().map(String::as_str) {
+            Some(v @ ("on" | "off")) => edit(|doc| doc.set(Setting::MenuBar, v == "on")).map(|_| {
+                macos::notify_agent_reload();
+                println!("menu bar icon {v}");
+            }),
+            _ => Err("usage: bopen menu-bar on|off".into()),
+        },
         "browsers" => {
             browsers_cmd();
             Ok(())
@@ -81,6 +100,13 @@ pub fn run(args: Vec<String>) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Edit the live config in place (comments kept), refusing any result the agent would reject.
+fn edit(f: impl FnOnce(&mut ConfigDoc)) -> Result<(), String> {
+    let mut doc = ConfigDoc::load(&config_path())?;
+    f(&mut doc);
+    doc.save()
 }
 
 /// Pull `--config PATH` out of `args`; without it, the live config path.

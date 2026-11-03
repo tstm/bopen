@@ -251,7 +251,7 @@ pub struct ProfileInfo {
 
 impl ProfileInfo {
     /// Display name, directory, or account email, case-insensitive.
-    fn matches(&self, wanted: &str) -> bool {
+    pub fn matches(&self, wanted: &str) -> bool {
         [Some(&self.name), Some(&self.dir), self.email.as_ref()]
             .into_iter()
             .flatten()

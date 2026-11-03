@@ -184,11 +184,27 @@ fn host_of(authority: &str) -> String {
 pub struct Ruleset {
     rules: Vec<Rule>,
     default: Target,
+    settings: Settings,
+}
+
+/// The `[ui]` table: switches the menu bar (and later the preferences window) flip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Settings {
+    pub menu_bar: bool,
+    /// Every link goes to `default`; rules are ignored but still validated.
+    pub paused: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings { menu_bar: true, paused: false }
+    }
 }
 
 #[derive(Debug)]
 struct Rule {
     name: Option<String>,
+    enabled: bool,
     cond: Conditions,
     rewrite: Option<Template>,
     open: Target,
@@ -256,6 +272,8 @@ pub enum RuleRef {
         name: Option<String>,
     },
     Default,
+    /// `[ui] paused = true` sent it to `default`.
+    Paused,
 }
 
 impl fmt::Display for RuleRef {
@@ -264,6 +282,7 @@ impl fmt::Display for RuleRef {
             RuleRef::Index { index, name: Some(n) } => write!(f, "rule #{} {n:?}", index + 1),
             RuleRef::Index { index, name: None } => write!(f, "rule #{}", index + 1),
             RuleRef::Default => f.write_str("default"),
+            RuleRef::Paused => f.write_str("default (paused)"),
         }
     }
 }
@@ -296,12 +315,21 @@ struct FileDto {
     default: Option<toml::Spanned<String>>,
     #[serde(default)]
     rule: Vec<toml::Spanned<RuleDto>>,
+    ui: Option<UiDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UiDto {
+    menu_bar: Option<bool>,
+    paused: Option<bool>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RuleDto {
     name: Option<String>,
+    enabled: Option<bool>,
     #[serde(default)]
     from: OneOrMany,
     #[serde(default)]
@@ -338,7 +366,11 @@ impl OneOrMany {
 impl Ruleset {
     /// What the agent uses when no config has ever parsed: no rules, default Safari.
     pub fn builtin() -> Self {
-        Ruleset { rules: vec![], default: Target::parse("safari").expect("safari is known") }
+        Ruleset {
+            rules: vec![],
+            default: Target::parse("safari").expect("safari is known"),
+            settings: Settings::default(),
+        }
     }
 
     /// Parse and validate. Rejects, with the line and rule:
@@ -380,7 +412,12 @@ impl Ruleset {
             })
             .collect::<Result<_, _>>()?;
 
-        Ok(Ruleset { rules, default })
+        let defaults = Settings::default();
+        let settings = file.ui.map_or(defaults, |ui| Settings {
+            menu_bar: ui.menu_bar.unwrap_or(defaults.menu_bar),
+            paused: ui.paused.unwrap_or(defaults.paused),
+        });
+        Ok(Ruleset { rules, default, settings })
     }
 
     /// Read + parse. A missing file is `Ok(None)`; callers decide what that means.
@@ -392,9 +429,12 @@ impl Ruleset {
         }
     }
 
-    /// First match wins.
+    /// First enabled match wins. Paused: always `default`.
     pub fn route(&self, req: &Request) -> Route<'_> {
-        for (index, rule) in self.rules.iter().enumerate() {
+        if self.settings.paused {
+            return Route { rule: RuleRef::Paused, url: req.link.raw.clone(), target: &self.default };
+        }
+        for (index, rule) in self.rules.iter().enumerate().filter(|(_, r)| r.enabled) {
             if let Some(caps) = rule.cond.matches(req) {
                 let url = match &rule.rewrite {
                     Some(t) => t.expand(&req.link, &caps),
@@ -415,6 +455,10 @@ impl Ruleset {
 
     pub fn default_target(&self) -> &Target {
         &self.default
+    }
+
+    pub fn settings(&self) -> Settings {
+        self.settings
     }
 
     pub fn len(&self) -> usize {
@@ -468,7 +512,13 @@ impl Rule {
             }
         }
 
-        Ok(Rule { name: dto.name, cond, rewrite, open: Target::parse(&dto.open)? })
+        Ok(Rule {
+            name: dto.name,
+            enabled: dto.enabled.unwrap_or(true),
+            cond,
+            rewrite,
+            open: Target::parse(&dto.open)?,
+        })
     }
 }
 
@@ -737,6 +787,19 @@ mod tests {
     fn rejects_rule_without_conditions_with_line() {
         let e = err("default = \"safari\"\n\n[[rule]]\nopen = \"chrome\"\n");
         assert!(e.contains("no conditions") && e.contains("line 3"), "{e}");
+    }
+
+    #[test]
+    fn disabled_rules_and_pause_fall_through_to_default() {
+        let text = "default = \"firefox\"\n[[rule]]\nhost = \"a.com\"\nenabled = false\nopen = \"chrome\"\n\
+                    [[rule]]\nhost = \"a.com\"\nopen = \"safari\"\n";
+        let rs = Ruleset::parse(text).unwrap();
+        assert_eq!(routed(&rs, "https://a.com/", None, "").2, "safari");
+        let paused = Ruleset::parse(&format!("{text}[ui]\npaused = true\n")).unwrap();
+        assert_eq!(routed(&paused, "https://a.com/", None, "").0, RuleRef::Paused);
+        assert_eq!(routed(&paused, "https://a.com/", None, "").2, "firefox");
+        assert_eq!(rs.settings(), Settings::default());
+        assert!(err("[ui]\nmenubar = true\n").contains("menubar"));
     }
 
     #[test]

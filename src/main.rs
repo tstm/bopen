@@ -7,9 +7,12 @@
 mod agent;
 mod browsers;
 mod cli;
+mod config_edit;
 mod install;
 mod macos;
+mod menu;
 mod rules;
+mod ui;
 
 /// Single source of truth for our identity. Info.plist (install.rs) and the self-open guard
 /// (`browsers::AppId::new`) both derive from it.
@@ -20,7 +23,19 @@ fn main() -> std::process::ExitCode {
     if args.is_empty() && running_from_bundle() {
         macos::run_agent(agent::Agent::new(agent::Log::open(false)));
     }
+    restore_sigpipe();
     cli::run(args)
+}
+
+/// Rust ignores SIGPIPE, so `bopen browsers | head` would panic on the closed pipe. A CLI should
+/// just exit quietly, as `cat` does.
+fn restore_sigpipe() {
+    unsafe extern "C" {
+        fn signal(signum: i32, handler: usize) -> usize;
+    }
+    const SIGPIPE: i32 = 13;
+    const SIG_DFL: usize = 0;
+    unsafe { signal(SIGPIPE, SIG_DFL) };
 }
 
 /// Typing `bopen` in a terminal prints help instead of starting a headless app.

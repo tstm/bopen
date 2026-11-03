@@ -26,6 +26,13 @@
 #               `bopen browsers` lists browsers and their profiles.
 #   rewrite   = optional new URL to open instead. Placeholders:
 #               {url} {scheme} {host} {path} {query} and {1}..{9} from `path`.
+#   enabled   = false turns a rule off without deleting it.
+#
+# The menu bar icon (and `bopen default chrome:Work`) rewrites `default` in place;
+# your comments stay. Optional switches, shown with their defaults:
+#   [ui]
+#   menu_bar = true    # show the icon; `bopen menu-bar off` hides it
+#   paused = false     # send every link to `default`; `bopen pause` / `bopen resume`
 
 default = "safari"
 

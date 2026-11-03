@@ -3,7 +3,7 @@
 bopen routes every link you click on macOS to the right browser, browser profile, or app.
 Rules can match on the app you clicked the link in, the URL, and the modifier keys you held.
 
-It works like Velja or Finicky, but has no UI. It is configured with a small TOML file and is a single binary of about 700 KB.
+It works like Velja or Finicky. It is configured with a small TOML file, has a menu bar icon for switching the default browser, and is a single binary of about 850 KB.
 
 ## Install
 
@@ -17,11 +17,22 @@ bopen install
 1. Builds `~/Applications/bopen.app` from the binary. The app has no Dock icon and is ad-hoc signed. Xcode is not required.
 2. Registers the app with LaunchServices.
 3. Writes the example config to `~/.config/bopen/config.toml`, if there is no config yet. The `default` in that config is set to your current default browser.
-4. Asks macOS to make bopen the default browser. macOS shows one confirmation dialog.
+4. Adds a login item (`~/Library/LaunchAgents/dev.bopen.plist`) and starts bopen, so the menu bar icon is there now and after every login.
+5. Asks macOS to make bopen the default browser. macOS shows one confirmation dialog.
 
 To build and register the app without changing the default browser, use `bopen install --no-default`. Run `bopen set-default` later.
 
 After each `cargo install`, run `bopen install` again. The command stops the running copy and replaces the app.
+
+## Menu bar
+
+The icon (a branching arrow) shows:
+- the default browser, with a submenu of profiles for Chrome, Brave, Edge, Firefox and the rest;
+- **Pause rules**, which sends every link to the default until you turn it off;
+- **Open config file**, **Show log** and **Quit bopen**;
+- a warning at the top when the config has an error or bopen is not the default browser. Click the warning to fix it.
+
+Choosing a browser rewrites the `default = ...` line in your config and keeps your comments. `bopen menu-bar off` hides the icon; bopen keeps routing links. If you quit bopen, the next link you click starts it again.
 
 ## Configure
 
@@ -61,6 +72,7 @@ open = "chrome:Work"
 | `url` | A glob on the whole URL. |
 | `modifiers` | Keys that must be held: `option`, `shift`, `command`, `control`. |
 | `open` | `safari`, `chrome`, `chrome:<profile>`, `brave:<profile>`, `edge:…`, `firefox:<profile>`, or the bundle id of any app. |
+| `enabled` | `false` turns the rule off without deleting it. |
 | `rewrite` | A different URL to open. Placeholders: `{url}` `{scheme}` `{host}` `{path}` `{query}` `{1}`–`{9}`. |
 
 A Chrome profile can be named in three ways: by the name shown in Chrome (`Work`), by its directory (`Profile 1`), or by the signed-in account email. Run `bopen browsers` to list them.
@@ -76,9 +88,12 @@ bopen test https://github.com/acme/api --from Slack --mods option   # dry run: s
 bopen test <url> --config draft.toml     # try an edit before you save it
 bopen open <url> --from Slack            # route a URL for real
 bopen check                              # validate the config, apps, profiles, and installation
+bopen default chrome:Work                # change `default`, keeping the file's comments
+bopen pause / bopen resume               # ignore the rules / use them again
+bopen menu-bar on|off                    # show or hide the menu bar icon
 bopen browsers                           # installed browsers and their profiles
 bopen log -f                             # follow routing decisions (one line per click)
-bopen uninstall                          # make the config's default the default browser again, and remove the app
+bopen uninstall                          # make the config's default the default browser again, remove the app and login item
 ```
 
 `bopen test` and the background app use the same code path, so a dry run gives the same result as a real click.

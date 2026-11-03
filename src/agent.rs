@@ -93,9 +93,9 @@ pub fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// One user-visible notification. Only used when a config save is rejected, since with no UI
-/// the user would otherwise never learn their edit was ignored.
-fn notify(title: &str, body: &str) {
+/// One user-visible notification, for edits that didn't take: a rejected config save, or a
+/// menu choice that couldn't be written.
+pub fn notify(title: &str, body: &str) {
     let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
     let script = format!("display notification {} with title {}", quote(body), quote(title));
     let _ = std::process::Command::new("/usr/bin/osascript").args(["-e", &script]).spawn();

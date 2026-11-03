@@ -41,15 +41,13 @@ pub fn install(set_default: bool) -> Result<(), String> {
     run(LSREGISTER, &["-f", path_str(&app)?])?;
     println!("installed {}", app.display());
 
-    let config = config_path();
-    if !config.exists() {
-        let previous = macos::default_browser().filter(|b| b != OWN_BUNDLE_ID);
-        let default = seed_default(previous.as_deref());
-        let text = EXAMPLE_CONFIG.replacen("default = \"safari\"", &format!("default = \"{default}\""), 1);
-        std::fs::create_dir_all(config.parent().expect("config has a parent"))
-            .and_then(|_| std::fs::write(&config, text))
-            .map_err(|e| format!("writing {}: {e}", config.display()))?;
-        println!("wrote example config to {} (default = \"{default}\")", config.display());
+    ensure_config()?;
+    write_login_item(&app)?;
+    println!("bopen will start at login ({})", login_item_path().display());
+
+    let started = run("/usr/bin/open", &["-g", path_str(&app)?]);
+    if let Err(e) = started {
+        println!("note: couldn't start bopen now ({e}); it starts on the next click or login");
     }
 
     if !set_default {
@@ -79,12 +77,62 @@ pub fn uninstall() -> Result<(), String> {
         macos::set_default_browser(&to)?;
     }
     macos::terminate_running_agent();
+    let _ = std::fs::remove_file(login_item_path());
     if app.exists() {
         let _ = run(LSREGISTER, &["-u", path_str(&app)?]);
         std::fs::remove_dir_all(&app).map_err(|e| format!("removing {}: {e}", app.display()))?;
     }
     println!("removed {}; config and log are left in place", app.display());
     Ok(())
+}
+
+/// The config path, after writing the example there if there was none. The example's `default`
+/// becomes the browser that was default before bopen, so installing changes nothing until edited.
+pub fn ensure_config() -> Result<PathBuf, String> {
+    let config = config_path();
+    if !config.exists() {
+        let previous = macos::default_browser().filter(|b| b != OWN_BUNDLE_ID);
+        let default = seed_default(previous.as_deref());
+        let text = EXAMPLE_CONFIG.replacen("default = \"safari\"", &format!("default = \"{default}\""), 1);
+        std::fs::create_dir_all(config.parent().expect("config has a parent"))
+            .and_then(|_| std::fs::write(&config, text))
+            .map_err(|e| format!("writing {}: {e}", config.display()))?;
+        println!("wrote example config to {} (default = \"{default}\")", config.display());
+    }
+    Ok(config)
+}
+
+fn login_item_path() -> PathBuf {
+    home().join(format!("Library/LaunchAgents/{OWN_BUNDLE_ID}.plist"))
+}
+
+/// A LaunchAgent rather than `SMAppService`: it needs no code signature beyond ad-hoc and can be
+/// written from the CLI. `open -g` starts the app through LaunchServices (so it is the registered
+/// URL handler) without stealing focus. Takes effect at the next login; `install` starts it now.
+fn write_login_item(app: &Path) -> Result<(), String> {
+    let path = login_item_path();
+    let plist = login_item_plist(path_str(app)?);
+    std::fs::create_dir_all(path.parent().expect("has a parent"))
+        .and_then(|_| std::fs::write(&path, plist))
+        .map_err(|e| format!("writing {}: {e}", path.display()))
+}
+
+fn login_item_plist(app: &str) -> String {
+    let app = app.replace('&', "&amp;").replace('<', "&lt;");
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{OWN_BUNDLE_ID}</string>
+  <key>ProgramArguments</key>
+  <array><string>/usr/bin/open</string><string>-g</string><string>{app}</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+</dict>
+</plist>
+"#
+    )
 }
 
 /// The browser that was default before bopen, as the config spells it.
@@ -166,6 +214,13 @@ mod tests {
     fn example_config_seed_line_exists() {
         // install rewrites this exact line; if the example changes, this must too.
         assert!(EXAMPLE_CONFIG.contains("\ndefault = \"safari\"\n"));
+    }
+
+    #[test]
+    fn login_item_opens_the_bundle_in_the_background() {
+        let p = login_item_plist("/Users/a&b/Applications/bopen.app");
+        assert!(p.contains("<string>-g</string><string>/Users/a&amp;b/Applications/bopen.app</string>"), "{p}");
+        assert!(p.contains("<key>RunAtLoad</key><true/>"));
     }
 
     #[test]

@@ -1,6 +1,12 @@
 # bopen UI plan
 
-Status: accepted 2026-11-03, not implemented yet. Decisions: launch at login, menu bar icon on by default, no browser-picker popup.
+Status: phases 1 and 2 implemented 2026-11-03 (config editing, menu bar, launch at login). Phases 3 to 5 are not started. Decisions: launch at login, menu bar icon on by default, no browser-picker popup.
+
+Deviations found while implementing phases 1 and 2:
+- Launch at login is a LaunchAgent (`~/Library/LaunchAgents/dev.bopen.plist`, running `open -g` on the bundle) written by `bopen install`, not `SMAppService`. `SMAppService.mainApp` registers the *calling* bundle, so the CLI can't register the app, and it would leave the ad-hoc signing question open. The LaunchAgent needs neither.
+- The CLI tells a running agent to re-read `[ui]` with a distributed notification (`dev.bopen.reload`). Reopening the app (double-click, `open`) does the same through `applicationShouldHandleReopen:`. A raw `rapp` Apple Event handler doesn't work, because NSApplication replaces it during launch.
+- Hand edits to `[ui] menu_bar` apply on the next reopen, `bopen menu-bar`, or agent start. Routing settings (`paused`, `default`, rules) apply on the next click, as before.
+- Every menu item and status line from the sketch shipped except "Open last link in…" (phase 5).
 
 ## Goal
 

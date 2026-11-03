@@ -90,7 +90,9 @@ pub fn run_agent(agent: Agent) -> ! {
             andEventID: GURL
         ];
     }
-    handler.ivars().borrow().log.line(format!("agent started (pid {})", std::process::id()));
+    let log = handler.ivars().borrow().log.clone();
+    log.line(format!("agent started (pid {})", std::process::id()));
+    let _menu = crate::ui::MenuController::install(mtm, log);
     app.run();
     std::process::exit(0)
 }
@@ -239,6 +241,19 @@ pub fn set_default_browser(app_bundle: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Tell a running agent the `[ui]` table changed. No-op if none runs.
+pub fn notify_agent_reload() {
+    let center = objc2_foundation::NSDistributedNotificationCenter::defaultCenter();
+    unsafe {
+        center.postNotificationName_object_userInfo_deliverImmediately(
+            &NSString::from_str(crate::ui::RELOAD_NOTIFICATION),
+            None,
+            None,
+            true,
+        );
+    }
 }
 
 /// Ask a running bopen agent to quit, so the next click starts the freshly installed binary.
