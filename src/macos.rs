@@ -248,12 +248,16 @@ pub fn notify_agent_reload() {
     let center = objc2_foundation::NSDistributedNotificationCenter::defaultCenter();
     unsafe {
         center.postNotificationName_object_userInfo_deliverImmediately(
-            &NSString::from_str(crate::ui::RELOAD_NOTIFICATION),
+            &NSString::from_str(&crate::ui::reload_notification()),
             None,
             None,
             true,
         );
     }
+}
+
+pub fn agent_running() -> bool {
+    NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(OWN_BUNDLE_ID)).count() > 0
 }
 
 /// Ask a running bopen agent to quit, so the next click starts the freshly installed binary.

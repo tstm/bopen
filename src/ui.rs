@@ -19,10 +19,16 @@ use crate::browsers::{KNOWN, Target};
 use crate::config_edit::{ConfigDoc, Setting};
 use crate::menu::{self, Action, ConfigView, Entry, InstalledBrowser, MenuState};
 use crate::rules::Ruleset;
+use crate::settings::SettingsController;
 use crate::{browsers, install, macos};
 
 /// Posted by the CLI after it edits `[ui]`, so the icon appears or disappears without a click.
-pub const RELOAD_NOTIFICATION: &str = "dev.bopen.reload";
+pub fn reload_notification() -> String {
+    format!("{OWN_BUNDLE_ID}.reload")
+}
+
+/// Set by `bopen settings` so a fresh launch opens the window; a running agent gets a reopen instead.
+pub const SHOW_SETTINGS_ENV: &str = "BOPEN_SHOW_SETTINGS";
 
 pub struct Ivars {
     log: Log,
@@ -31,6 +37,7 @@ pub struct Ivars {
     actions: RefCell<Vec<Action>>,
     /// The `Action::MakeDefaultBrowser` dialog is modal-ish; ignore re-entry while it's up.
     busy: Cell<bool>,
+    settings: Retained<SettingsController>,
 }
 
 define_class!(
@@ -66,10 +73,11 @@ define_class!(
     }
 
     unsafe impl NSApplicationDelegate for MenuController {
-        /// Double-clicking bopen.app (or `open` on it) while it runs.
+        /// Double-clicking bopen.app (or `bopen settings`) while it runs opens the settings.
         #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
         fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
             self.apply_settings();
+            self.ivars().settings.show();
             false
         }
     }
@@ -79,6 +87,7 @@ impl MenuController {
     /// Create the controller, show the icon if `[ui] menu_bar`, and listen for reload requests.
     pub fn install(mtm: MainThreadMarker, log: Log) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(Ivars {
+            settings: SettingsController::new(mtm, log.clone()),
             log,
             status_item: RefCell::new(None),
             actions: RefCell::new(vec![]),
@@ -89,12 +98,15 @@ impl MenuController {
             NSDistributedNotificationCenter::defaultCenter().addObserver_selector_name_object(
                 &this,
                 sel!(reload:),
-                Some(&NSString::from_str(RELOAD_NOTIFICATION)),
+                Some(&NSString::from_str(&reload_notification())),
                 None,
             );
         }
         NSApplication::sharedApplication(mtm).setDelegate(Some(ProtocolObject::from_ref(&*this)));
         this.apply_settings();
+        if std::env::var_os(SHOW_SETTINGS_ENV).is_some() {
+            this.ivars().settings.show();
+        }
         this
     }
 
@@ -211,11 +223,8 @@ impl MenuController {
                 self.ivars().busy.set(false);
             }
             Action::MakeDefaultBrowser => {}
-            Action::OpenConfig => {
-                if let Err(e) = install::ensure_config().and_then(|path| open_with(&["-t"], &path)) {
-                    log.line(format!("ERROR open config: {e}"));
-                }
-            }
+            Action::OpenSettings => self.ivars().settings.show(),
+            Action::OpenConfig => open_config(log),
             Action::ShowLog => {
                 if let Err(e) = open_with(&[], log.path()) {
                     log.line(format!("ERROR show log: {e}"));
@@ -226,16 +235,28 @@ impl MenuController {
     }
 }
 
-/// Everything the menu shows, read fresh each time it opens (a few `stat`s and two small reads).
-fn snapshot() -> MenuState {
-    let browsers = KNOWN
+/// In the user's text editor, writing the example first if there is no config yet.
+pub fn open_config(log: &Log) {
+    if let Err(e) = install::ensure_config().and_then(|path| open_with(&["-t"], &path)) {
+        log.line(format!("ERROR open config: {e}"));
+    }
+}
+
+/// Known browsers that are installed, with display names from their app bundles and profiles.
+pub fn installed_browsers() -> Vec<InstalledBrowser> {
+    KNOWN
         .iter()
         .filter_map(|known| {
             let path = macos::app_path(&Target::parse(known.key).ok()?.app())?;
             let label = path.file_stem().map_or(known.key.to_string(), |s| s.to_string_lossy().into_owned());
             Some(InstalledBrowser { known, label, profiles: browsers::profiles(known) })
         })
-        .collect();
+        .collect()
+}
+
+/// Everything the menu shows, read fresh each time it opens (a few `stat`s and two small reads).
+fn snapshot() -> MenuState {
+    let browsers = installed_browsers();
     let config = match Ruleset::load(&config_path()) {
         Ok(rules) => {
             let rules = rules.unwrap_or_else(Ruleset::builtin);

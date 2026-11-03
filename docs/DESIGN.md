@@ -41,12 +41,13 @@ let (launch, warning) = browsers::plan(route.target, route.url.clone());
 | `config_edit.rs` | comment-preserving writes to the config (`toml_edit`), validated by `Ruleset::parse` before an atomic write | no, pure |
 | `menu.rs` | the menu bar menu as data (`Entry`, `Action`) built from a `MenuState` snapshot | no, pure |
 | `ui.rs` | NSStatusItem, renders `menu::build`, applies `Action`s by editing the config; app delegate for reopen | yes |
+| `settings.rs` | the settings window: rule list, rule form, tester, General tab; edits go through `ConfigDoc` | yes |
 
 The load-bearing decisions:
 
 - **Types encode invariants.** A `Ruleset` exists only after `parse`, which rejects unknown keys, rules with no conditions, out-of-range `{n}` captures, profiles on Safari, and bopen as a target. `AppId::new` refuses bopen's bundle id, and `Launch` holds only an `AppId`, so a loop can't be expressed. Per type-system-discipline.
 - **One browser list.** `KNOWN` drives target parsing, error messages, `bopen browsers`, and profile discovery. A test checks the example config mentions the main keys.
-- **Pure core.** `route` and `plan` are the only decision logic, and both the agent and `bopen test` call them. The objc2 surface is `macos.rs` plus `ui.rs`. Per boundary-discipline.
+- **Pure core.** `route` and `plan` are the only decision logic, and both the agent and `bopen test` call them. The objc2 surface is `macos.rs`, `ui.rs` and `settings.rs`. Per boundary-discipline.
 - **Resident agent, no watcher.** One `stat` per click, a re-parse only on change, and the last good config kept when a save is broken. There are no threads, no FSEvents, and no locks. NSWorkspace completion handlers only log and start the next fallback. Per separate-before-serializing-shared-state.
 - **Idempotent install.** `bopen install` stops the old agent, builds in `bopen.app.tmp`, signs it, swaps it into place, and registers it. Running it again is the upgrade path. Per make-operations-idempotent.
 

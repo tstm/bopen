@@ -3,7 +3,7 @@
 bopen routes every link you click on macOS to the right browser, browser profile, or app.
 Rules can match on the app you clicked the link in, the URL, and the modifier keys you held.
 
-It works like Velja or Finicky. It is configured with a small TOML file, has a menu bar icon for switching the default browser, and is a single binary of about 850 KB.
+It works like Velja or Finicky. Rules live in a small TOML file that you can edit by hand or in the settings window. A menu bar icon switches the default browser. It is a single binary of about 1 MB.
 
 ## Install
 
@@ -29,10 +29,22 @@ After each `cargo install`, run `bopen install` again. The command stops the run
 The icon (a branching arrow) shows:
 - the default browser, with a submenu of profiles for Chrome, Brave, Edge, Firefox and the rest;
 - **Pause rules**, which sends every link to the default until you turn it off;
-- **Open config file**, **Show log** and **Quit bopen**;
+- **Settings…**, **Open config file**, **Show log** and **Quit bopen**;
 - a warning at the top when the config has an error or bopen is not the default browser. Click the warning to fix it.
 
 Choosing a browser rewrites the `default = ...` line in your config and keeps your comments. `bopen menu-bar off` hides the icon; bopen keeps routing links. If you quit bopen, the next link you click starts it again.
+
+## Settings window
+
+Open it from the menu bar icon (**Settings…**), by double-clicking `bopen.app` while bopen runs, or with `bopen settings`.
+
+- **Rules tab.**
+  - The rule list is on the left, in the order bopen checks the rules. Use **+** and **−** to add and remove rules, and **↑** and **↓** to reorder them.
+  - The selected rule's conditions and target are on the right. Lists are comma-separated.
+  - **Test a link** at the bottom shows which rule a URL matches, optionally for a source app. It updates as you edit.
+- **General tab.** The default browser, a **Make bopen the default browser** button, and switches for the menu bar icon, Pause rules and Start at login.
+
+Every change is saved to the config file as you make it, and your comments stay. If an edit would make the config invalid, the window shows the error and doesn't save it. Hand edits to the file show up when you switch back to the window.
 
 ## Configure
 
@@ -91,6 +103,7 @@ bopen check                              # validate the config, apps, profiles, 
 bopen default chrome:Work                # change `default`, keeping the file's comments
 bopen pause / bopen resume               # ignore the rules / use them again
 bopen menu-bar on|off                    # show or hide the menu bar icon
+bopen settings                           # open the settings window
 bopen browsers                           # installed browsers and their profiles
 bopen log -f                             # follow routing decisions (one line per click)
 bopen uninstall                          # make the config's default the default browser again, remove the app and login item

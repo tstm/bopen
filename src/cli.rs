@@ -30,6 +30,7 @@ usage:
   bopen default <target>         set `default` (e.g. chrome:Work), keeping the file's comments
   bopen pause | resume           send every link to `default` / use the rules again
   bopen menu-bar on|off          show or hide the menu bar icon
+  bopen settings                 open the settings window (rules editor)
   bopen browsers                 installed browsers and their profiles
   bopen log [-f]                 recent routing decisions (or follow them)
   bopen config                   print the config file path
@@ -70,6 +71,22 @@ pub fn run(args: Vec<String>) -> ExitCode {
             }),
             _ => Err("usage: bopen menu-bar on|off".into()),
         },
+        "settings" => {
+            let app = install::app_path();
+            match app.exists() {
+                // A running agent gets a reopen event instead; `open` refuses `--env` for it.
+                true => Command::new("/usr/bin/open")
+                    .args(match macos::agent_running() {
+                        true => vec![],
+                        false => vec!["--env".to_string(), format!("{}=1", crate::ui::SHOW_SETTINGS_ENV)],
+                    })
+                    .arg(&app)
+                    .status()
+                    .map(drop)
+                    .map_err(|e| format!("open: {e}")),
+                false => Err(format!("{} is not installed (`bopen install`)", app.display())),
+            }
+        }
         "browsers" => {
             browsers_cmd();
             Ok(())
@@ -106,7 +123,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
 fn edit(f: impl FnOnce(&mut ConfigDoc)) -> Result<(), String> {
     let mut doc = ConfigDoc::load(&config_path())?;
     f(&mut doc);
-    doc.save()
+    doc.save().map_err(|e| format!("not saved, {}: {e}", config_path().display()))
 }
 
 /// Pull `--config PATH` out of `args`; without it, the live config path.

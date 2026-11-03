@@ -48,6 +48,7 @@ pub enum Action {
     SetDefault(String),
     SetPaused(bool),
     MakeDefaultBrowser,
+    OpenSettings,
     OpenConfig,
     ShowLog,
     Quit,
@@ -80,6 +81,7 @@ pub fn build(state: &MenuState) -> Vec<Entry> {
     let paused = state.config.as_ref().is_ok_and(|c| c.paused);
     menu.push(Entry::Item { title: "Pause rules".into(), action: Action::SetPaused(!paused), checked: paused });
     menu.push(Entry::Separator);
+    menu.push(Entry::Item { title: "Settings…".into(), action: Action::OpenSettings, checked: false });
     menu.push(Entry::Item { title: "Open config file".into(), action: Action::OpenConfig, checked: false });
     menu.push(Entry::Item { title: "Show log".into(), action: Action::ShowLog, checked: false });
     menu.push(Entry::Item { title: "Quit bopen".into(), action: Action::Quit, checked: false });

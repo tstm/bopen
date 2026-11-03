@@ -12,11 +12,16 @@ mod install;
 mod macos;
 mod menu;
 mod rules;
+mod settings;
 mod ui;
 
 /// Single source of truth for our identity. Info.plist (install.rs) and the self-open guard
-/// (`browsers::AppId::new`) both derive from it.
-pub const OWN_BUNDLE_ID: &str = "dev.bopen";
+/// (`browsers::AppId::new`) both derive from it. `BOPEN_BUNDLE_ID=dev.bopen.test cargo build`
+/// makes a test copy that can run beside a real install without either one stopping the other.
+pub const OWN_BUNDLE_ID: &str = match option_env!("BOPEN_BUNDLE_ID") {
+    Some(id) => id,
+    None => "dev.bopen",
+};
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with("-psn_")).collect();

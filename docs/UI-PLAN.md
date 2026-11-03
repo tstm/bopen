@@ -1,12 +1,21 @@
 # bopen UI plan
 
-Status: phases 1 and 2 implemented 2026-11-03 (config editing, menu bar, launch at login). Phases 3 to 5 are not started. Decisions: launch at login, menu bar icon on by default, no browser-picker popup.
+Status: phases 1 to 4 implemented 2026-11-03 (config editing, menu bar, launch at login, settings window with rules editor and tester). Phase 5 ("Open last link in…", drag reorder, app-name tokens) is not started. Decisions: launch at login, menu bar icon on by default, no browser-picker popup.
 
 Deviations found while implementing phases 1 and 2:
 - Launch at login is a LaunchAgent (`~/Library/LaunchAgents/dev.bopen.plist`, running `open -g` on the bundle) written by `bopen install`, not `SMAppService`. `SMAppService.mainApp` registers the *calling* bundle, so the CLI can't register the app, and it would leave the ad-hoc signing question open. The LaunchAgent needs neither.
 - The CLI tells a running agent to re-read `[ui]` with a distributed notification (`dev.bopen.reload`). Reopening the app (double-click, `open`) does the same through `applicationShouldHandleReopen:`. A raw `rapp` Apple Event handler doesn't work, because NSApplication replaces it during launch.
 - Hand edits to `[ui] menu_bar` apply on the next reopen, `bopen menu-bar`, or agent start. Routing settings (`paused`, `default`, rules) apply on the next click, as before.
 - Every menu item and status line from the sketch shipped except "Open last link in…" (phase 5).
+
+Deviations in phases 3 and 4:
+- Two tabs (Rules, General) in an NSTabView, not four toolbar tabs. Browsers and Advanced were folded in: the open-in and default-browser combo boxes list installed browsers and profiles, and General has Open config file. `bopen browsers` and `bopen check` stay the detailed views.
+- Lists are comma-separated text fields, not NSTokenFields, and reordering uses ↑/↓ buttons, not drag. Both are phase 5 polish.
+- Targets are typed into combo boxes in config spelling (`chrome:Work`, `us.zoom.xos`). The list offers every installed browser and profile plus every target the file already uses.
+- Text fields save when they lose focus or on Return, not on every keystroke, so a half-typed pattern is never validated.
+- While the window is open, bopen switches to a regular app (Dock icon, menu bar with Edit and Window menus), so ⌘C/⌘V/⌘W work. It switches back when the window closes.
+- `bopen settings` passes `BOPEN_SHOW_SETTINGS` to a fresh launch, and sends a reopen to a running agent.
+- `BOPEN_BUNDLE_ID=dev.bopen.test cargo build` builds a test copy that runs beside a real install. A shared bundle id let a test install stop the real agent.
 
 ## Goal
 

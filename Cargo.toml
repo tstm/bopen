@@ -17,12 +17,16 @@ block2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = [
   "std", "NSAppleEventDescriptor", "NSAppleEventManager", "NSString", "NSURL", "NSArray",
   "NSError", "NSObject", "NSRunLoop", "NSDate", "NSBundle", "NSEnumerator", "block2",
-  "NSNotification", "NSDistributedNotificationCenter",
+  "NSNotification", "NSDistributedNotificationCenter", "NSIndexSet", "NSGeometry",
 ] }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
   "std", "NSApplication", "NSRunningApplication", "NSWorkspace", "NSEvent", "NSResponder",
   "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView",
   "NSMenu", "NSMenuItem", "NSImage", "NSCell", "block2", "libc", "objc2-core-foundation",
+  "NSWindow", "NSTabView", "NSTabViewItem", "NSTableView", "NSTableColumn", "NSScrollView",
+  "NSClipView", "NSTextField", "NSComboBox", "NSFont", "NSColor", "NSText", "NSGraphics",
+  "NSActionCell", "NSTextFieldCell", "NSComboBoxCell", "NSButtonCell", "NSUserInterfaceLayout",
+  "NSUserInterfaceItemIdentification", "NSTableHeaderView", "NSFontDescriptor",
 ] }
 serde = { version = "1", features = ["derive"] }
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }

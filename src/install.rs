@@ -102,6 +102,20 @@ pub fn ensure_config() -> Result<PathBuf, String> {
     Ok(config)
 }
 
+pub fn login_item_enabled() -> bool {
+    login_item_path().exists()
+}
+
+pub fn set_login_item(on: bool) -> Result<(), String> {
+    match on {
+        true => write_login_item(&app_path()),
+        false => match std::fs::remove_file(login_item_path()) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{}: {e}", login_item_path().display())),
+            _ => Ok(()),
+        },
+    }
+}
+
 fn login_item_path() -> PathBuf {
     home().join(format!("Library/LaunchAgents/{OWN_BUNDLE_ID}.plist"))
 }
