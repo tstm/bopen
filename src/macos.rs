@@ -4,11 +4,11 @@
 use std::cell::RefCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{LazyLock, mpsc};
 use std::time::{Duration, Instant};
 
 use block2::RcBlock;
-use objc2::rc::Retained;
+use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{AnyObject, NSObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
@@ -22,6 +22,7 @@ use objc2_foundation::{
 use crate::OWN_BUNDLE_ID;
 use crate::agent::{Agent, Log};
 use crate::browsers::{AppId, Launch};
+use crate::lanes::Lanes;
 use crate::rules::{Link, Modifiers, Request, SourceApp, SourceVia};
 
 const fn fourcc(s: &[u8; 4]) -> u32 {
@@ -69,7 +70,7 @@ impl Handler {
             log.line("ERROR panic while routing; opening in Safari");
             vec![Launch::fallback(&raw)]
         });
-        open_chain(chain, log);
+        open_in_turn(chain, log);
     }
 }
 
@@ -142,56 +143,68 @@ fn current_modifiers() -> Modifiers {
     .fold(Modifiers::default(), |acc, (_, m)| acc.union(m))
 }
 
-/// Try each launch in order until one succeeds (failures can be immediate or asynchronous).
-fn open_chain(mut chain: Vec<Launch>, log: Log) {
-    if chain.is_empty() {
-        return;
+/// Open a click's launches on its app's lane: after the links clicked before it for that app,
+/// and without blocking the main thread. Tries each launch in order until one succeeds.
+pub fn open_in_turn(chain: Vec<Launch>, log: Log) {
+    static LANES: LazyLock<Lanes<(Vec<Launch>, Log)>> = LazyLock::new(|| Lanes::new(open_chain));
+    if let Some(app) = chain.first().map(|l| l.app().as_str().to_string()) {
+        LANES.push(&app, (chain, log));
     }
-    let launch = chain.remove(0);
+}
+
+fn open_chain((chain, log): (Vec<Launch>, Log)) {
+    autoreleasepool(|_| {
+        for (i, launch) in chain.iter().enumerate() {
+            match deliver(launch, &log) {
+                Ok(()) => return,
+                Err(e) => {
+                    let next = chain.get(i + 1).map_or("giving up".into(), |l| format!("trying {l}"));
+                    log.line(format!("ERROR opening with {launch}: {e}; {next}"));
+                }
+            }
+        }
+    })
+}
+
+/// Returns once the app has the link: the browser acknowledged the hand-off, or LaunchServices
+/// delivered it and any new instance has finished starting (or already exited, having passed
+/// the link on).
+fn deliver(launch: &Launch, log: &Log) -> Result<(), String> {
     let started = Instant::now();
     match launch.try_handoff() {
         Some(Ok(())) => {
             let ms = started.elapsed().as_secs_f64() * 1000.0;
-            return log.line(format!("handed to running {} in {ms:.1} ms", launch.app().as_str()));
+            log.line(format!("handed to running {} in {ms:.1} ms", launch.app().as_str()));
+            return Ok(());
         }
         Some(Err(e)) => {
             log.line(format!("hand-off to running {} failed ({e}); launching instead", launch.app().as_str()))
         }
         None => {}
     }
-    let what = launch.to_string();
-    open(&launch, move |result| {
-        if let Err(e) = result {
-            let next = chain.first().map_or("giving up".into(), |l| format!("trying {l}"));
-            log.line(format!("ERROR opening with {what}: {e}; {next}"));
-            open_chain(chain.clone(), log.clone());
-        }
-    });
+    open_blocking(launch)
 }
 
-/// Execute a launch. Returns once the request is handed to NSWorkspace; `done` runs exactly once,
-/// possibly on another thread.
-pub fn open(launch: &Launch, done: impl Fn(Result<(), String>) + Send + 'static) {
+/// Execute a launch and wait (spinning the run loop on the main thread) until LaunchServices
+/// reports back. A new instance is waited for until it finishes launching or exits: until then
+/// its browser may not be listening for the next link yet.
+pub fn open_blocking(launch: &Launch) -> Result<(), String> {
     let ws = NSWorkspace::sharedWorkspace();
     let Some(app_url) = app_url(launch.app()) else {
-        return done(Err(format!("{} is not installed", launch.app().as_str())));
-    };
-    let url = match launch {
-        Launch::OpenUrl { url, .. } => match NSURL::URLWithString(&NSString::from_str(url)) {
-            Some(u) => Some(u),
-            None => return done(Err(format!("not a valid URL: {url}"))),
-        },
-        Launch::NewInstance { .. } => None,
+        return Err(format!("{} is not installed", launch.app().as_str()));
     };
     let cfg = NSWorkspaceOpenConfiguration::configuration();
     cfg.setActivates(true);
-    let handler =
-        RcBlock::new(move |_app: *mut NSRunningApplication, err: *mut NSError| match unsafe { err.as_ref() } {
-            Some(err) => done(Err(err.localizedDescription().to_string())),
-            None => done(Ok(())),
+    let (tx, rx) = mpsc::channel();
+    let handler = RcBlock::new(move |app: *mut NSRunningApplication, err: *mut NSError| {
+        let _ = tx.send(match unsafe { err.as_ref() } {
+            Some(err) => Err(err.localizedDescription().to_string()),
+            None => Ok(unsafe { app.as_ref() }.map(|a| a.processIdentifier())),
         });
-    match (launch, url) {
-        (Launch::OpenUrl { .. }, Some(url)) => {
+    });
+    match launch {
+        Launch::OpenUrl { url, .. } => {
+            let url = NSURL::URLWithString(&NSString::from_str(url)).ok_or(format!("not a valid URL: {url}"))?;
             ws.openURLs_withApplicationAtURL_configuration_completionHandler(
                 &NSArray::from_retained_slice(&[url]),
                 &app_url,
@@ -199,24 +212,28 @@ pub fn open(launch: &Launch, done: impl Fn(Result<(), String>) + Send + 'static)
                 Some(&handler),
             );
         }
-        (Launch::OpenUrl { .. }, None) => unreachable!("URL validated above"),
-        (Launch::NewInstance { args, .. }, _) => {
+        Launch::NewInstance { args, .. } => {
             cfg.setCreatesNewApplicationInstance(true);
             let args: Vec<_> = args.iter().map(|a| NSString::from_str(a)).collect();
             cfg.setArguments(&NSArray::from_retained_slice(&args));
             ws.openApplicationAtURL_configuration_completionHandler(&app_url, &cfg, Some(&handler));
         }
     }
+    let pid = wait(&rx, LAUNCH_TIMEOUT).unwrap_or_else(|| Err("timed out waiting for LaunchServices".into()))?;
+    if let (Launch::NewInstance { .. }, Some(pid)) = (launch, pid) {
+        let deadline = Instant::now() + LAUNCH_TIMEOUT;
+        while NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+            .is_some_and(|app| !app.isFinishedLaunching() && !app.isTerminated())
+            && Instant::now() < deadline
+        {
+            spin(Duration::from_millis(20));
+        }
+    }
+    Ok(())
 }
 
-/// Like `open`, but waits (spinning the run loop) until NSWorkspace reports back. For the CLI.
-pub fn open_blocking(launch: &Launch) -> Result<(), String> {
-    let (tx, rx) = mpsc::channel();
-    open(launch, move |r| {
-        let _ = tx.send(r);
-    });
-    wait(&rx, Duration::from_secs(15)).unwrap_or_else(|| Err("timed out waiting for LaunchServices".into()))
-}
+/// Generous: a cold browser start under an on-access scanner takes seconds.
+const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// LaunchServices lookup. None = not installed.
 fn app_url(app: &AppId) -> Option<Retained<NSURL>> {
@@ -303,6 +320,10 @@ fn wait<T>(rx: &mpsc::Receiver<T>, timeout: Duration) -> Option<T> {
     }
 }
 
+/// Off the main thread a run loop has no sources and would return at once, so just sleep.
 fn spin(d: Duration) {
-    NSRunLoop::currentRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(d.as_secs_f64()));
+    match MainThreadMarker::new() {
+        Some(_) => NSRunLoop::currentRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(d.as_secs_f64())),
+        None => std::thread::sleep(d),
+    }
 }

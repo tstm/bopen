@@ -9,6 +9,7 @@ mod browsers;
 mod cli;
 mod config_edit;
 mod install;
+mod lanes;
 mod macos;
 mod menu;
 mod rules;

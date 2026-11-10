@@ -224,7 +224,9 @@ fn chromium_handoff(socket: &Path, args: &[String]) -> Result<(), String> {
     stream.set_read_timeout(timeout).and_then(|_| stream.set_write_timeout(timeout)).map_err(|e| e.to_string())?;
     let message = ["START", "/", "bopen"].into_iter().chain(args.iter().map(String::as_str)).collect::<Vec<_>>();
     stream.write_all(message.join("\0").as_bytes()).map_err(|e| format!("sending: {e}"))?;
-    stream.shutdown(std::net::Shutdown::Write).map_err(|e| e.to_string())?;
+    // The browser may have read the message, answered, and closed its end already (a few times
+    // in ten under a burst). The answer is still there to read, so this failing proves nothing.
+    let _ = stream.shutdown(std::net::Shutdown::Write);
     let mut reply = String::new();
     stream.take(64).read_to_string(&mut reply).map_err(|e| format!("waiting for the browser: {e}"))?;
     match reply.as_str() {

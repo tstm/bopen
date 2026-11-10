@@ -242,12 +242,7 @@ impl MenuController {
                     log.line(format!("WARN {w}"));
                 }
                 log.line(format!("menu: open {} in {target}", Link::parse(&url).redacted()));
-                let log = log.clone();
-                macos::open(&launch, move |result| {
-                    if let Err(e) = result {
-                        log.line(format!("ERROR opening with {target}: {e}"));
-                    }
-                });
+                macos::open_in_turn(vec![launch], log.clone());
             }
             Action::Quit => NSApplication::sharedApplication(self.mtm()).terminate(None),
         }
