@@ -21,7 +21,7 @@ See [README.md](../README.md) and [example-config.toml](../example-config.toml).
 // macos.rs, per click: Apple Event -> Request -> ordered fallback chain -> NSWorkspace
 let req = Request { link: Link::parse(&raw), source: source_from_event(event), modifiers: current_modifiers() };
 let chain = agent.handle(&req);          // infallible: [routed, default, Safari], deduped
-open_chain(chain, log);                  // tries each until one succeeds
+open_in_turn(chain, log);                // on the app's lane; tries each until one succeeds
 
 // cli.rs, `bopen test`: the same pure functions, without opening anything
 let route = rules.route(&req);
@@ -35,7 +35,8 @@ let (launch, warning) = browsers::plan(route.target, route.url.clone());
 | `rules.rs` | `Request`, `Link`, `SourceApp`, `Modifiers`, `Ruleset` (TOML parse + validation, first-match routing, globs, rewrite templates) | no, pure |
 | `browsers.rs` | the single `KNOWN` browser table, `AppId`, `Target`, profile discovery, `plan(Target, url) -> Launch` | no |
 | `agent.rs` | resident state: config cache keyed by (mtime, len), last good ruleset, the fallback chain, the log | no |
-| `macos.rs` | all objc2 and `unsafe` code: GURL handler, sender PID -> app, modifiers, `open`, default-browser get/set, terminating the agent | yes |
+| `lanes.rs` | one worker thread per app, so links for the same app open one at a time in click order | no |
+| `macos.rs` | all objc2 and `unsafe` code: GURL handler, sender PID -> app, modifiers, `open_in_turn` / `open_blocking`, default-browser get/set, terminating the agent | yes |
 | `install.rs` | `.app` assembly, Info.plist, `codesign -s -`, `lsregister`, seeding the example config | shells out |
 | `cli.rs` | subcommands | via `macos` |
 | `config_edit.rs` | comment-preserving writes to the config (`toml_edit`), validated by `Ruleset::parse` before an atomic write | no, pure |
@@ -95,6 +96,7 @@ These are accepted deviations from the c1 sketch. Each was surfaced by running t
 - The `bopen agent` foreground subcommand was dropped. LaunchServices delivers events to the bundle, not to a terminal process, so `bopen log -f` covers the same need.
 - `loginwindow` is excluded as a frontmost source. It is frontmost while the screen is locked.
 - Chromium profile links skip the second process when the browser is running (2026-11-03, after the user reported multi-second delays on a Mac with Microsoft Defender). `Launch::NewInstance` carries the browser's `SingletonSocket`. `try_handoff` writes Chromium's ProcessSingleton message (`START\0<cwd>\0<argv0>\0<args>…`) and waits for `ACK`; any failure (not running, stale socket, `SHUTDOWN`, timeout) falls through to the old launch. Measured here: launching the second instance took 170–730 ms until LaunchServices reported it; the hand-off takes 0.1–0.4 ms, and Chrome activates its own window. The socket in the profile directory is a symlink to a short temp path, because socket addresses are limited to 104 bytes; Bopen follows it, as Chromium does.
+- Links for the same app open one at a time (2026-11-10, after the user reported Chrome links lost when clicked in quick succession). Before, every click started its launch at once: several new Chrome instances could start together, each one racing the others to reach the running browser, and a burst of hand-offs can overflow Chrome's socket backlog (5 here; 3 of 10 simultaneous connections were refused). Now each app has a lane in `lanes.rs`. A link is done when the browser acknowledges the hand-off, or when LaunchServices has delivered it and any new instance has finished launching or exited. Only then does the next link for that app start. Other apps don't wait, and the main thread never blocks on a browser. A hand-off whose write shutdown fails still counts if the browser answers `ACK`. The browser can read, answer and close first, and treating that as a failure opened the link a second time.
 
 ## Open questions and risks
 
