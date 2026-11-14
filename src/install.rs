@@ -33,6 +33,7 @@ pub fn install(set_default: bool) -> Result<(), String> {
         .map_err(|e| format!("writing Info.plist: {e}"))?;
     std::fs::copy(&exe, macos_dir.join("bopen")).map_err(|e| format!("copying {}: {e}", exe.display()))?;
     run("/usr/bin/codesign", &["--force", "--sign", "-", path_str(&tmp)?])?;
+    let signature_changed = cdhash(&app).is_none_or(|old| cdhash(&tmp) != Some(old));
 
     if app.exists() {
         std::fs::remove_dir_all(&app).map_err(|e| format!("removing old {}: {e}", app.display()))?;
@@ -40,6 +41,9 @@ pub fn install(set_default: bool) -> Result<(), String> {
     std::fs::rename(&tmp, &app).map_err(|e| format!("moving bundle into place: {e}"))?;
     run(LSREGISTER, &["-f", path_str(&app)?])?;
     println!("installed {}", app.display());
+    if signature_changed {
+        reset_app_data_access();
+    }
 
     ensure_config()?;
     write_login_item(&app)?;
@@ -199,6 +203,26 @@ fn info_plist(version: &str) -> String {
 </plist>
 "#
     )
+}
+
+/// The hash an ad-hoc signature is identified by, or None if `app` isn't a signed bundle.
+fn cdhash(app: &Path) -> Option<String> {
+    let out = Command::new("/usr/bin/codesign").args(["-dvvv"]).arg(app).output().ok()?;
+    // codesign prints its details on stderr.
+    let details = String::from_utf8_lossy(&out.stderr);
+    details.lines().find_map(|l| l.strip_prefix("CDHash=")).map(str::to_string)
+}
+
+/// An ad-hoc signature's designated requirement is its cdhash, so macOS keeps a Chrome data grant
+/// for the old build, and turns the toggle off each time the new build fails to match it. Forgetting
+/// the grant makes macOS ask again on the next read of a browser's profile list.
+fn reset_app_data_access() {
+    let reset = ["SystemPolicyAppDataDetailed", "SystemPolicyAppData"]
+        .map(|service| run("/usr/bin/tccutil", &["reset", service, OWN_BUNDLE_ID]));
+    match reset.into_iter().find_map(Result::err) {
+        None => println!("the signature changed, so macOS will ask again before Bopen reads browser profiles"),
+        Some(e) => println!("note: couldn't reset browser data access ({e}); if the toggle turns itself off, run `tccutil reset SystemPolicyAppDataDetailed {OWN_BUNDLE_ID}`"),
+    }
 }
 
 fn path_str(p: &Path) -> Result<&str, String> {
