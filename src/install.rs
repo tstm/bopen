@@ -221,7 +221,9 @@ fn reset_app_data_access() {
         .map(|service| run("/usr/bin/tccutil", &["reset", service, OWN_BUNDLE_ID]));
     match reset.into_iter().find_map(Result::err) {
         None => println!("the signature changed, so macOS will ask again before Bopen reads browser profiles"),
-        Some(e) => println!("note: couldn't reset browser data access ({e}); if the toggle turns itself off, run `tccutil reset SystemPolicyAppDataDetailed {OWN_BUNDLE_ID}`"),
+        Some(e) => println!(
+            "note: couldn't reset browser data access ({e}); if the toggle turns itself off, run `tccutil reset SystemPolicyAppDataDetailed {OWN_BUNDLE_ID}`"
+        ),
     }
 }
 
